@@ -20,4 +20,5 @@ Step 3 - calculate biodiversity metrics:
 
 Step 4 - collate and plot:
 
-`gdm_cross_tax.Rmd` combines data across the taxonomic groups and creates the figures
+`gdm_cross_tax.Rmd` combines data across the taxonomic groups and creates the figures. Includes the main and supplementary figures.
+

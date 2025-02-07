@@ -563,72 +563,6 @@ cowplot::save_plot("outputs/ext_comb.png", ext_comb, base_height = 8, base_width
 
 ```
 
-# Supplementary - Colocation RCP4.5 and RCP6.0
-
-```{r}
-
-comb_disnov_supp <- load_disnov(tax = tax, scenarios = c("rcp45_2070", "rcp60_2070")) %>% 
-  # neat names
-  dplyr::mutate(tax = dplyr::recode(tax, plants = "Plants", butterflies = "Butterflies", birds = "Birds")) %>% 
-  dplyr::mutate(rcp = dplyr::recode(rcp, rcp45_2070 = "RCP4.5", rcp60_2070 = "RCP6.0")) %>% 
-  # convert to factor
-  dplyr::mutate(tax = factor(tax, levels = c("Plants", "Butterflies", "Birds"))) %>% 
-  dplyr::mutate(rcp = factor(rcp, levels = rev(c("RCP4.5", "RCP6.0"))))
-
-dim_set <- 2
-col_bi <- "DkBlue2"
-
-# threshold
-thresh <- 10
-
-# text label size
-lab_size <- 4
-
-# thresholded colocation map
-comb_disnov_fct_supp <- comb_disnov_supp %>%
-  dplyr::mutate(analogue_dis = dplyr::case_when(
-    disappearing_min < thresh ~ "analogue",
-    disappearing_min >= thresh ~ "dis"
-  )) %>%
-  dplyr::mutate(analogue_nov = dplyr::case_when(
-    novel_min < thresh ~ "analogue",
-    novel_min >= thresh ~ "nov"
-  )) %>%
-  dplyr::mutate(analogue_dis = factor(analogue_dis, levels = c("analogue", "dis")),
-                analogue_nov = factor(analogue_nov, levels = c("analogue", "nov")))
-
-# create bivariate classes
-coloc_supp <- biscale::bi_class(comb_disnov_fct_supp, x = analogue_nov, y = analogue_dis, style = "quantile", dim = dim_set)
-
-coloc_leg_supp <- biscale::bi_legend(pal = col_bi,
-                    dim = dim_set,
-                    xlab = "Novel",
-                    ylab = "Disappearing",
-                    size = 12)
-
-# maps
-clc_pl_45 <- coloc_map(df = coloc_supp, rcp_name = "RCP4.5", tax_name = "plants", title = "RCP4.5")
-clc_pl_60 <- coloc_map(df = coloc_supp, rcp_name = "RCP6.0", tax_name = "plants", title = "RCP6.0")
-
-clc_bu_45 <- coloc_map(df = coloc_supp, rcp_name = "RCP4.5", tax_name = "butterflies", title = "RCP4.5")
-clc_bu_60 <- coloc_map(df = coloc_supp, rcp_name = "RCP6.0", tax_name = "butterflies", title = "RCP6.0")
-
-clc_bi_45 <- coloc_map(df = coloc_supp, rcp_name = "RCP4.5", tax_name = "birds", title = "RCP4.5")
-clc_bi_60 <- coloc_map(df = coloc_supp, rcp_name = "RCP6.0", tax_name = "birds", title = "RCP6.0")
-
-# combine plots
-coloc_comb_supp <- cowplot::plot_grid(
-  cowplot::plot_grid(clc_pl_45,  clc_bu_45, clc_bi_45, nrow = 1, labels = c("A", "", "")),
-  cowplot::plot_grid(clc_pl_60, clc_bu_60, clc_bi_60, nrow = 1, labels = c("B", "", "")),
-  cowplot::plot_grid(NULL, coloc_leg_supp, NULL, nrow = 1, rel_widths = c(1, 1, 1)),
-  nrow = 3, rel_heights = c(1, 1, 0.5)) +
-  ggplot2::theme(plot.background = element_rect(fill = "white", colour = "white"))
-
-# # save
-# cowplot::save_plot(paste0("outputs/coloc_comb_min_supp_thresh_", thresh, ".png"), coloc_comb_supp, base_height = 9, base_width = 6.4, dpi = 300)
-
-```
-
 # Supplementary - Covariates
 
 ```{r}
@@ -667,17 +601,6 @@ env_plots <- function(x) {
 # generate plots
 env_out <- lapply(1:nrow(lookup), env_plots)
 
-# # Split
-# 
-# # combine plots
-# env_org_fhalf <- cowplot::plot_grid(plotlist = env_out[1:5], ncol = 2)
-# env_org_shalf <- cowplot::plot_grid(plotlist = env_out[6:10], ncol = 2)
-# 
-# # save plots
-# cowplot::save_plot("outputs/env_covs_fhalf.png", env_org_fhalf, base_height = 10, base_width = 7.5)
-# cowplot::save_plot("outputs/env_covs_shalf.png", env_org_shalf, base_height = 10, base_width = 7.5)
-
-# One page
 env_org_all <- cowplot::plot_grid(plotlist = env_out, ncol = 3) +
   ggplot2::theme(plot.background = element_rect(fill = "white", colour = "white"))
 
@@ -860,42 +783,6 @@ gd_fit_all <- cowplot::plot_grid(plotlist = gd_fit_out, ncol = 2) +
 cowplot::save_plot("outputs/gd_fit_all.png", gd_fit_all, base_height = 10, base_width = 15, dpi = 300)
 
 ```
-
-# Supplementary - Reference cells
-
-```{r}
-
-# reference cells as comparison - 20% of cells
-ref_cells <- readRDS("data/ref_cells.rds") %>% 
-  dplyr::mutate(ref = 1)
-
-# basemap
-base_df <- as.data.frame(covars, xy = TRUE) %>% 
-  # drop cells with missing env data
-  dplyr::filter(!is.na(tri)) %>% 
-  # just cells with environmental data
-  dplyr::mutate(z = 1) %>% 
-  dplyr::select(x, y, z)
-
-# combine basemaps and sites
-ref_base <- dplyr::left_join(base_df, ref_cells, by = c("x", "y"))
-
-ref_map <- ggplot2::ggplot(ref_base, ggplot2::aes(x = x, y = y)) +
-  # basemap
-  ggplot2::geom_raster(fill = "lightgrey") +
-  # add reference cells
-  #ggplot2::geom_point(data = dplyr::filter(ref_base, ref == 1), colour = "black", size = 0.000000001) +
-  ggplot2::geom_raster(data = dplyr::filter(ref_base, ref == 1), fill = "black") +
-  # equal coordinates
-  ggplot2::coord_equal() +
-  # theme adjustments
-  ggplot2::theme_void() +
-  ggplot2::theme(plot.background = ggplot2::element_rect(fill = "white", colour = "white"))
-
-cowplot::save_plot("outputs/ref_map.png", ref_map, base_height = 3.5, base_width = 2)
-
-```
-
 
 # Supplementary - Biological change
 
@@ -1603,16 +1490,6 @@ p_spline <- cowplot::plot_grid(tmax_sp, tmin_sp + ggplot2::labs(y = ""), prec_sp
 cowplot::save_plot(paste0("outputs/", tax, "/", tax, "_spline.png"), p_spline, base_height = 14, base_width = 14, dpi = 300)
 
 ```
-
-# Supplementary - Extinction England, Scotland, Wales
-
-```{r}
-
-# regional estimate of species committed to extinction
-ext_regional <- 1 - exp(sum(pers_df$numerator_ln) / sum(pers_df$cell_weight))
-
-```
-
 
 
 

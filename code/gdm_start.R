@@ -20,6 +20,7 @@ library(corrplot)
 library(iNEXT)
 library(tibble)
 library(pbmcapply)
+library(scico)
 
 # commit packages to renv library
 # renv::snapshot()
