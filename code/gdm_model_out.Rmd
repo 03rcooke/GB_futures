@@ -1,0 +1,479 @@
+---
+title: "gdm_model_out"
+author: "Rob Cooke"
+date: "08/06/2021"
+output: html_notebook
+---
+
+## Load model ##
+
+```{r}
+
+##############
+# chose taxonomic group
+tax <- "birds"
+##############
+
+# load model
+gdmr <- readRDS(paste0("data/", tax, "/out_data/", tax, "_gdmr.rds"))
+
+# reference cells as comparison - 20% of cells
+ref_cells <- readRDS("data/ref_cells.rds")
+
+# transformed predictors current
+# tmin is dropped for butterflies as the coefficient = 0
+tr_curr <- readRDS(paste0("data/", tax, "/out_data/", tax, "_tr_curr.rds"))
+
+# transformed predictors current - reference cells - 20% of cells
+tr_curr_rc <- readRDS(paste0("data/", tax, "/out_data/", tax, "_tr_curr_rc.rds"))
+
+## helper functions
+
+# function to remove intercept from gdm predictions - see Mokany et al., 2022
+remove_int <- function(mod, pred){
+  adjust <- 0 - log(1 - pred) - mod$intercept
+  
+  adjust_diss <- 1 - exp(0 - adjust)
+  
+  return(adjust_diss)
+}
+
+# function to exit function
+exit <- function() { invokeRestart("abort") }  
+
+# first letter to uppercase
+firstup <- function(x) {
+  substr(x, 1, 1) <- toupper(substr(x, 1, 1))
+  x
+}
+
+# assumed species area relationship following Di Marco et al (2019) and references contained within
+z <- 0.25
+
+# baseline year
+baseline_yr <- 2015
+
+```
+
+## Disappearing and novel environments ##
+
+adapted code from Mokany et al., 2022
+
+```{r}
+
+#### disappearing ####
+
+# current covariates
+covs_dis <- as.data.frame(raster::stack(covars), xy = TRUE) %>% 
+  # drop nas
+  tidyr::drop_na() %>%
+  # rename x and y for predict.gdm function
+  dplyr::rename(xCoord = x, yCoord = y) %>% 
+  # add s1 to column names
+  dplyr::rename_with(.cols = dplyr::everything(), function(x) {paste0("s1.", x)}) %>% 
+  # distance and weights for predict.gdm function
+  dplyr::mutate(distance = 1,
+                weights = 1)
+
+# function to calculate disappearing environments per scenario
+disap <- function(covs_dis, gdmr, scenario, scenario_name, tax) {
+  
+  # future covariates
+  fut_covs <- as.data.frame(raster::stack(scenario), xy = TRUE) %>% 
+    # drop nas
+    tidyr::drop_na() %>% 
+    # rename x and y for predict.gdm function
+    dplyr::rename(xCoord = x, yCoord = y) %>% 
+    # add s2 to column names
+    dplyr::rename_with(.cols = dplyr::everything(), function(x) {paste0("s2.", x)})
+  
+  print("step 1: done")
+  
+  # calculation of disappearing environments
+  disappear_gdm <- pbmcapply::pbmclapply(1:nrow(covs_dis), function(i) {
+    
+    # focal cell
+    one_cell <- covs_dis[i,]
+    
+    # join focal cell to all future cells
+    dat <- dplyr::bind_cols(one_cell, fut_covs) %>% 
+      # reorder columns for predict.gdm function
+      dplyr::select(distance, weights, s1.xCoord, s1.yCoord, s2.xCoord, s2.yCoord, dplyr::starts_with("s1"), dplyr::starts_with("s2"))
+    
+    # predict dissimilarity between current cell and all future cells
+    pred_diss <- predict(object = gdmr, dat, time = FALSE)
+    
+    # remove effect of intercept
+    # see Mokany et al., 2022
+    pred_diss_adj <- remove_int(gdmr, pred_diss)
+    
+    # combine into dataframe (min, mean, median)
+    pred_diss_df <- data.frame(min = min(pred_diss_adj), mean = mean(pred_diss_adj), median = median(pred_diss_adj))
+    
+  }, mc.cores = 4, mc.preschedule = FALSE) %>% 
+    dplyr::bind_rows()
+  
+  print("step 2: done")
+  
+  disappear_df <- dplyr::bind_cols(dplyr::select(covs_dis, s1.xCoord, s1.yCoord), disappear_gdm) %>% 
+    setNames(c("x", "y", "disappearing_min", "disappearing_mean", "disappearing_median"))
+  
+  print("step 3: done")
+  
+  saveRDS(disappear_df, paste0("data/", tax, "/out_data/disappear/", tax, "_disappear_", scenario_name, ".rds"))
+
+  print("finished")
+  
+}
+
+disap(covs_dis = covs_dis, gdmr = gdmr, scenario = covars_rcp26_2030, scenario_name = "rcp26_2030", tax = tax)
+disap(covs_dis = covs_dis, gdmr = gdmr, scenario = covars_rcp26_2050, scenario_name = "rcp26_2050", tax = tax)
+disap(covs_dis = covs_dis, gdmr = gdmr, scenario = covars_rcp26_2070, scenario_name = "rcp26_2070", tax = tax)
+disap(covs_dis = covs_dis, gdmr = gdmr, scenario = covars_rcp45_2030, scenario_name = "rcp45_2030", tax = tax)
+disap(covs_dis = covs_dis, gdmr = gdmr, scenario = covars_rcp45_2050, scenario_name = "rcp45_2050", tax = tax)
+disap(covs_dis = covs_dis, gdmr = gdmr, scenario = covars_rcp45_2070, scenario_name = "rcp45_2070", tax = tax)
+disap(covs_dis = covs_dis, gdmr = gdmr, scenario = covars_rcp60_2030, scenario_name = "rcp60_2030", tax = tax)
+disap(covs_dis = covs_dis, gdmr = gdmr, scenario = covars_rcp60_2050, scenario_name = "rcp60_2050", tax = tax)
+disap(covs_dis = covs_dis, gdmr = gdmr, scenario = covars_rcp60_2070, scenario_name = "rcp60_2070", tax = tax)
+disap(covs_dis = covs_dis, gdmr = gdmr, scenario = covars_rcp85_2030, scenario_name = "rcp85_2030", tax = tax)
+disap(covs_dis = covs_dis, gdmr = gdmr, scenario = covars_rcp85_2050, scenario_name = "rcp85_2050", tax = tax)
+disap(covs_dis = covs_dis, gdmr = gdmr, scenario = covars_rcp85_2070, scenario_name = "rcp85_2070", tax = tax)
+
+#### novel ####
+
+# takes ~10 hours per scenario
+
+# current covariates
+covs_nov <- as.data.frame(raster::stack(covars), xy = TRUE) %>% 
+  # drop nas
+  tidyr::drop_na() %>%
+  # rename x and y for predict.gdm function
+  dplyr::rename(xCoord = x, yCoord = y) %>% 
+  # add s2 to column names
+  dplyr::rename_with(.cols = dplyr::everything(), function(x) {paste0("s2.", x)})
+
+# function to calculate novel environments per scenario
+novel <- function(covs_nov, gdmr, scenario, scenario_name, tax) {
+  
+  # future covariates
+  fut_covs <- as.data.frame(raster::stack(scenario), xy = TRUE) %>% 
+    # drop nas
+    tidyr::drop_na() %>% 
+    # rename x and y for predict.gdm function
+    dplyr::rename(xCoord = x, yCoord = y) %>% 
+    # add s2 to column names
+    dplyr::rename_with(.cols = dplyr::everything(), function(x) {paste0("s1.", x)}) %>%
+    # distance and weights for predict.gdm function
+    dplyr::mutate(distance = 1,
+                  weights = 1)
+  
+  print("step 1: done")
+  
+  # calculation of novel environments
+  novel_gdm <- pbmcapply::pbmclapply(1:nrow(fut_covs), function(i) {
+    
+    # focal future cell
+    one_cell <- fut_covs[i,]
+    
+    # join focal future cell to all current cells
+    dat <- dplyr::bind_cols(one_cell, covs_nov) %>% 
+      # reorder columns for predict.gdm function
+      dplyr::select(distance, weights, s1.xCoord, s1.yCoord, s2.xCoord, s2.yCoord, dplyr::starts_with("s1"), dplyr::starts_with("s2"))
+    
+    # predict dissimilarity between future cell and all current cells
+    pred_diss <- predict(object = gdmr, dat, time = FALSE)
+    
+    # remove effect of intercept
+    # see Mokany et al., 2022
+    pred_diss_adj <- remove_int(gdmr, pred_diss)
+    
+    # combine into dataframe (min, mean, median)
+    pred_diss_df <- data.frame(min = min(pred_diss_adj), mean = mean(pred_diss_adj), median = median(pred_diss_adj))
+    
+  }, mc.cores = 4, mc.preschedule = FALSE) %>% 
+    dplyr::bind_rows()
+  
+  print("step 2: done")
+  
+  novel_df <- dplyr::bind_cols(dplyr::select(fut_covs, s1.xCoord, s1.yCoord), novel_gdm) %>% 
+    setNames(c("x", "y", "novel_min", "novel_mean", "novel_median"))
+  
+  print("step 3: done")
+  
+  saveRDS(novel_df, paste0("data/", tax, "/out_data/novel/", tax, "_novel_", scenario_name, ".rds"))
+
+  print("finished")
+  
+}
+
+novel(covs_nov = covs_nov, gdmr = gdmr, scenario = covars_rcp26_2030, scenario_name = "rcp26_2030", tax = tax)
+novel(covs_nov = covs_nov, gdmr = gdmr, scenario = covars_rcp26_2050, scenario_name = "rcp26_2050", tax = tax)
+novel(covs_nov = covs_nov, gdmr = gdmr, scenario = covars_rcp26_2070, scenario_name = "rcp26_2070", tax = tax)
+novel(covs_nov = covs_nov, gdmr = gdmr, scenario = covars_rcp45_2030, scenario_name = "rcp45_2030", tax = tax)
+novel(covs_nov = covs_nov, gdmr = gdmr, scenario = covars_rcp45_2050, scenario_name = "rcp45_2050", tax = tax)
+novel(covs_nov = covs_nov, gdmr = gdmr, scenario = covars_rcp45_2070, scenario_name = "rcp45_2070", tax = tax)
+novel(covs_nov = covs_nov, gdmr = gdmr, scenario = covars_rcp60_2030, scenario_name = "rcp60_2030", tax = tax)
+novel(covs_nov = covs_nov, gdmr = gdmr, scenario = covars_rcp60_2050, scenario_name = "rcp60_2050", tax = tax)
+novel(covs_nov = covs_nov, gdmr = gdmr, scenario = covars_rcp60_2070, scenario_name = "rcp60_2070", tax = tax)
+novel(covs_nov = covs_nov, gdmr = gdmr, scenario = covars_rcp85_2030, scenario_name = "rcp85_2030", tax = tax)
+novel(covs_nov = covs_nov, gdmr = gdmr, scenario = covars_rcp85_2050, scenario_name = "rcp85_2050", tax = tax)
+novel(covs_nov = covs_nov, gdmr = gdmr, scenario = covars_rcp85_2070, scenario_name = "rcp85_2070", tax = tax)
+
+```
+
+## Species committed to extinction under land-use change and climate change ##
+
+adapted from code in Mokany et al., 2022 and equations in Di Marco et al., 2019
+
+use this function to create tr_hc_fut_rc for each future
+
+```{r}
+
+# function to calculate persistence under land-use change and climate change
+pers <- function(gdmr, tr_curr, tr_curr_rc, ref_cells, hc_scenario, cc_scenario, scenario_name, tax, save = FALSE) {
+
+  # extract habitat condition data from raster with x and y coordinates
+  hc_df <- as.data.frame(hc_scenario, xy = TRUE) %>%
+    # rename habitat condition score as "hc"
+    dplyr::rename(hc = mean)
+
+  # transform future environmental covariates based on ecological relationships
+  # a non-linear transform of each environmental grid to include the estimated coefficients
+  # see Manion G., (2009) A technique for monotonic regression splines to enable non-linear transformation of GIS rasters. 18th World IMACS/MODSIM Congress, Cairns, Australia. https://www.mssanz.org.au/modsim09/F13/manion_F13a.pdf
+  trans_fut <- gdm::gdm.transform(model = gdmr, data = raster::stack(cc_scenario)) %>%
+    # convert to dataframe with x and y coordinates
+    as.data.frame(xy = TRUE)
+
+  # join transformed future environmental covariates and habitat condition data
+  tr_hc_fut_rc <- dplyr::inner_join(trans_fut, hc_df, by = c("x", "y")) %>%
+    # drop nas
+    tidyr::drop_na() %>%
+    # only reference cells - random 20% of cells
+    dplyr::right_join(ref_cells, by = c("x", "y"))
+
+  # save files for HPC
+  if(save == TRUE) {
+
+    # save tr_hc_fut_rc
+    saveRDS(tr_hc_fut_rc, paste0("data/", tax, "/out_data/tr_hc_fut/", tax, "_", scenario_name, "_tr_hc_fut_rc.rds"))
+
+    # exit function
+    exit()
+
+    }
+
+  # calculate persistence values for each focal cell i for all reference cells j
+  # run in parallel across 4 cores
+  pers_df <- lapply(1:1, function(i) {
+    # pbmcapply::pbmclapply
+
+    # focal cell
+    one_cell <- tr_curr[i,] # current
+
+    # reference cells j
+    rc_curr <- tr_curr_rc[-i,] # current
+    rc_fut <- tr_hc_fut_rc[-i,] # future
+
+    # similarity between focal cell i and current reference cells j(1:(0.2*n))
+    similarity_ij_curr <- sapply(1:nrow(rc_curr), function(j) {
+
+      # ecological distance between focal cell i and current reference cell j
+      ecol_dist_curr <- sum(abs(as.matrix(dplyr::select(one_cell, xCoord:sun)) - as.matrix(dplyr::select(rc_curr[j,], xCoord:sun))))
+
+      # compositional similarity between focal cell i and current reference cell j
+      similarity_curr <- (exp(-1 * (gdmr$intercept + ecol_dist_curr)))
+
+    }) # close sapply
+
+    # summed similarity across current reference cells assume pristine habitat everywhere
+    # Aibaseline in Di Marco et al., 2019 equation 1
+    # denominator in Di Marco et al., 2019 equation 4
+    sum_similarity_pristine <- sum(similarity_ij_curr)
+
+    # similarity between focal cell i and future reference cells j(1:(0.2*n))
+    similarity_ij_fut <- sapply(1:nrow(rc_fut), function(j) {
+
+      # ecological distance between focal cell i and future reference cell j
+      ecol_dist_fut <- sum(abs(as.matrix(dplyr::select(one_cell, xCoord:sun)) - as.matrix(dplyr::select(rc_fut[j,], xCoord:sun))))
+
+      # compositional similarity between focal cell i and future reference cell j
+      similarity_fut <- (exp(-1 * (gdmr$intercept + ecol_dist_fut)))
+
+    }) # close sapply
+
+    # summed similarity across future reference cells when accounting for habitat condition
+    # numerator in Di Marco et al., 2019 equation 4
+    sum_similarity_hc <- sum(similarity_ij_fut * as.matrix(dplyr::select(rc_fut, hc))[,1])
+
+    # compile outputs and calculate persistence per cell
+    pers_ij <- one_cell %>%
+      dplyr::mutate(sim_hc = sum_similarity_hc,
+                    sim_pris = sum_similarity_pristine) %>%
+      # expected persistence using species-area relationship
+      # pitest in Di Marco et al., 2019 equation 3
+      dplyr::mutate(pers = (sim_hc / sim_pris) ^ z) %>%
+      # extinction risk
+      dplyr::mutate(extinct = 1 - pers) %>%
+      # cell weight
+      # w in Di Marco et al., 2019 equation 6
+      dplyr::mutate(cell_weight = 1 / sim_pris) %>%
+      # numermouldenator see Mokany et al., 2022 Supporting Information Appendix S1 - section 2.10
+      dplyr::mutate(numerator = pers * cell_weight) %>%
+      # numerator in geometric mean see Di Marco et al., 2019 equation 5
+      dplyr::mutate(numerator_ln = log(pers) * cell_weight) %>%
+      # select necessary columns
+      dplyr::select(x, y, hc:numerator_ln)
+
+  }) %>%
+  #, mc.cores = 4, mc.preschedule = TRUE) %>%
+    # bind across focal cells i
+    dplyr::bind_rows()
+
+  # # save dataframe
+  # saveRDS(pers_df, paste0("data/", tax, "/out_data/", tax, "_pers_lu_", scenario_name, ".rds"))
+
+}
+
+# run function
+# change future in three places
+pers(gdmr = gdmr, tr_curr = tr_curr, tr_curr_rc = tr_curr_rc, ref_cells = ref_cells, hc_scenario = hc_rcp85_ssp5_2070, cc_scenario = covars_rcp85_2070, scenario_name = "rcp85_ssp5_2070", tax = tax, save = TRUE)
+
+```
+
+## Baseline ##
+
+use this to create baseline_2020_tr_hc_rd
+
+```{r}
+
+# function to calculate persistence under land-use change only
+baseline <- function(gdmr, tr_curr, ref_cells, hc_scenario, scenario_name, tax) {
+  
+  # extract habitat condition data from raster with x and y coordinates
+  hc_df <- as.data.frame(hc_scenario, xy = TRUE) %>% 
+    # rename habitat condition score as "hc"
+    dplyr::rename(hc = LandUseIndex)
+  
+  # join transformed environmental covariates and habitat condition data
+  tr_hc_rc <- dplyr::inner_join(dplyr::select(tr_curr, -hc), hc_df, by = c("x", "y")) %>% 
+    # drop nas
+    tidyr::drop_na() %>%
+    # only refence cells
+    dplyr::right_join(ref_cells, by = c("x", "y"))
+  
+  # save tr_hc
+  saveRDS(tr_hc_rc, paste0("data/", tax, "/out_data/", tax, "_", scenario_name, "_tr_hc_rc.rds"))
+  
+}
+
+# # run baseline function
+# baseline(gdmr = gdmr, tr_curr = tr_curr, ref_cells = ref_cells, hc_scenario = hc_baseline_2020, scenario_name = "baseline_2020", tax = tax)
+
+```
+
+## Regional estimates of species committed to extinction under land-use change and climate change ##
+
+```{r}
+
+# function to calculate regional estimates of species committed to extinction
+pers_reg <- function(scenario_name, tax, lims, leg = FALSE) {
+  
+  # load data
+  pers_df <- readRDS(paste0("data/", tax, "/out_data/pers/", tax, "_", scenario_name, ".rds")) %>%   
+    # expected persistence using species-area relationship
+    # pitest in Di Marco et al., 2019 equation 3
+    dplyr::mutate(pers = (sim_hc / sim_pris) ^ z) %>% 
+    # extinction risk
+    dplyr::mutate(extinct = 1 - pers) %>% 
+    # cell weight
+    # w in Di Marco et al., 2019 equation 6
+    dplyr::mutate(cell_weight = 1 / sim_pris) %>% 
+    # numerator see Mokany et al., 2022 Supporting Information Appendix S1 - section 2.10
+    dplyr::mutate(numerator = pers * cell_weight) %>% 
+    # numerator in geometric mean see Di Marco et al., 2019 equation 5
+    dplyr::mutate(numerator_ln = log(pers) * cell_weight) %>% 
+    # select necessary columns
+    dplyr::select(x, y, hc:numerator_ln)
+    
+  # regional estimate of species committed to extinction
+  ext_regional <- 1 - exp(sum(pers_df$numerator_ln) / sum(pers_df$cell_weight))
+  
+  splt <- unlist(strsplit(scenario_name, "_"))
+  
+  # dataframe for regional estimate
+  if(splt[[1]] != "baseline") {
+    ext_reg_df <- data.frame(tax = tax, rcp = as.character(gsub("\\D", "", splt[[1]])), ssp = as.character(gsub("\\D", "", splt[[2]])), year = as.numeric(splt[[3]]), ext_reg = as.numeric(ext_regional))
+  } else {
+      ext_reg_df <- data.frame(tax = tax, rcp = splt[[1]], ssp = splt[[1]], year = baseline_yr, ext_reg = as.numeric(ext_regional))
+      }
+  
+  # save regional estimate
+  saveRDS(ext_reg_df, paste0("data/", tax, "/out_data/ext_reg/", tax, "_", scenario_name, ".rds"))
+  
+}
+
+# scenario names
+sc_nms <- c("rcp26_ssp1_2030", "rcp26_ssp1_2050", "rcp26_ssp1_2070", "rcp45_ssp2_2030", "rcp45_ssp2_2050", "rcp45_ssp2_2070", "rcp45_ssp4_2030", "rcp45_ssp4_2050", "rcp45_ssp4_2070", "rcp60_ssp3_2030", "rcp60_ssp3_2050", "rcp60_ssp3_2070", "rcp85_ssp2_2030", "rcp85_ssp2_2050", "rcp85_ssp2_2070", "rcp85_ssp5_2030", "rcp85_ssp5_2050", "rcp85_ssp5_2070")
+
+lapply(sc_nms, function(scenario_name) pers_reg(scenario_name = scenario_name, tax = tax))
+
+# baseline
+pers_reg(scenario_name = "baseline_2020", tax = tax)
+
+```
+
+## Reference cells and tr_curr ##
+
+```{r}
+
+# # reference cells
+#
+# # extract habitat condition data from raster with x and y coordinates
+# hc_df <- as.data.frame(hc_rcp85_ssp5_2070, xy = TRUE) %>%
+#   # rename habitat condition score as "hc"
+#   dplyr::rename(hc = mean)
+#
+# # join transformed environmental covariates and habitat condition data
+# tr_hc <- dplyr::inner_join(trans_curr, hc_df, by = c("x", "y")) %>%
+#   # drop nas
+#   tidyr::drop_na()
+#
+# ref_cells <- dplyr::slice_sample(tr_hc, prop = 0.20, replace = FALSE) %>%
+#   dplyr::select(x, y)
+#
+# saveRDS(ref_cells, "data/ref_cells.rds")
+
+# # tr_curr, tr_curr_rc, tr_curr_split
+# 
+# # transform environmental covariates based on ecological relationships
+# # a non-linear transform of each environmental grid to include the estimated coefficients
+# # see Manion G., (2009) A technique for monotonic regression splines to enable non-linear transformation of GIS rasters. 18th World IMACS/MODSIM Congress, Cairns, Australia. https://www.mssanz.org.au/modsim09/F13/manion_F13a.pdf
+# trans_curr <- gdm::gdm.transform(model = gdmr, data = raster::stack(covars)) %>%
+#   # convert to dataframe with x and y coordinates
+#   as.data.frame(xy = TRUE)
+# 
+# hc_df <- as.data.frame(hc_rcp26_ssp1_2030, xy = TRUE) %>% # all habitat condition rasters have same number of non-na cells
+#   # rename habitat condition score as "hc"
+#   dplyr::rename(hc = mean)
+# 
+# # join transformed environmental covariates and habitat condition data
+# tr_curr <- dplyr::inner_join(trans_curr, hc_df, by = c("x", "y")) %>%
+#   # drop nas
+#   tidyr::drop_na()
+# 
+# saveRDS(tr_curr, paste0("data/", tax, "/out_data/", tax, "_tr_curr.rds"))
+# 
+# tr_curr_rc <- tr_curr %>%
+#   # only reference cells
+#   dplyr::right_join(ref_cells, by = c("x", "y"))
+# 
+# saveRDS(tr_curr_rc, paste0("data/", tax, "/out_data/", tax, "_tr_curr_rc.rds"))
+# 
+# tr_curr_split <- dplyr::mutate(tr_curr, grp = as.numeric(ggplot2::cut_number(1:nrow(tr_curr), 10000))) %>%
+#   split(., f = .$grp)
+# 
+# saveRDS(tr_curr_split, paste0("data/", tax, "/out_data/", tax, "_tr_curr_split.rds"))
+
+```
+
+

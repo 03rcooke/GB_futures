@@ -1,0 +1,190 @@
+---
+title: "gdm_birds"
+author: "Rob Cooke"
+date: "08/06/2021"
+output: html_notebook
+---
+# Birds #
+
+## Tidy biological data ##
+
+```{r}
+
+bto_site_loc <- readRDS("data/birds/prep_data/bto_site_loc.rds")
+
+bto_spp <- readRDS("data/birds/prep_data/bto_spp_yr.rds")
+# length(unique(bto_spp$species)) = 233 species
+
+# locations
+bto_xy <- bto_site_loc %>% 
+  dplyr::select(x, y, site = monad) %>% 
+  # cell identifier
+  dplyr::mutate(cell = paste0(x, y))
+
+# # check for duplicates
+# bto_dup <- bto_spp %>%
+#   janitor::get_dupes(year, square, species)
+# # no duplicates
+
+bto_foc <- bto_spp %>%  
+  # focal years
+  # last 10 years of baseline period, as realization of community
+  dplyr::filter(year %in% 2001:2010) %>% 
+  dplyr::rename(site = square, sind = count) %>% 
+  dplyr::left_join(bto_xy, by = "site")
+
+# incidence
+bto_pa <- bto_foc %>% 
+  # convert to presence-absence
+  dplyr::mutate(sind = ifelse(sind > 0, 1, 0))
+
+# summarise data across years
+bto_comb <- bto_pa %>% 
+  # per cell and species
+  dplyr::group_by(cell, species, x, y) %>% 
+  # summarise presence across years per site and species
+  dplyr::summarise(sind = max(sind)) %>% 
+  dplyr::ungroup()
+
+```
+
+## Sample coverage ##
+
+```{r}
+
+# # prepare data into split list for each site speciesxyear matrix
+# bto_split <- bto_pa %>%
+#   dplyr::select(cell, species, year, sind) %>%
+#   # add year_ to year column to make easier column names
+#   dplyr::mutate(year = paste0("year_", year)) %>%
+#   # complete data with zeros for species per site per sampled year
+#   tidyr::complete(tidyr::nesting(cell, year), species, fill = list(sind = 0)) %>%
+#   # convert to wide format - each year is a sample
+#   tidyr::pivot_wider(names_from = year, values_from = sind) %>%
+#   # split into a list
+#   split(., .$cell)
+# 
+# # convert to format for iNEXT function
+# bto_inxt <- lapply(bto_split, function(x) {
+# 
+#   x %>%
+#     # drop cell identifier
+#     dplyr::select(-cell) %>%
+#     # drop unsampled years
+#     janitor::remove_empty(which = "cols") %>%
+#     # add species as rownames
+#     tibble::column_to_rownames("species") %>%
+#     # convert to matrix
+#     as.matrix(.)
+# 
+#     })
+# 
+# # calculate sample coverage
+# inxt <- lapply(1:length(bto_inxt), function(x) {
+# 
+#   # run inext but catch errors and return NULL
+#   return(tryCatch(iNEXT::iNEXT(bto_inxt[x], datatype = "incidence_raw"), error = function(e) NULL))
+# 
+# })
+# 
+# saveRDS(inxt, "data/birds/out_data/bto_inxt.rds")
+# 
+# # inxt <- readRDS("data/birds/out_data/bto_inxt.rds")
+# 
+# # extract sample coverage estimates into data frame
+# # get dataframe from inext objects
+# inxt_df <- sapply(inxt, "[[", 1) %>%
+#   # combine
+#   dplyr::bind_rows() %>%
+#   # remove broken site column
+#   dplyr::select(-site) %>%
+#   # add cell identifier
+#   tibble::rownames_to_column("cell") %>%
+#   # sites with at least two sampled years
+#   dplyr::filter(T > 1) %>%
+#   # sites with at least two sampled species
+#   dplyr::filter(S.obs > 1)
+# 
+# # save sample coverage dataframe for plot in gdm_cross_taxa.Rmd
+# saveRDS(inxt_df, "data/birds/out_data/birds_inxt_df.rds")
+
+inxt_df <- readRDS("data/birds/out_data/birds_inxt_df.rds")
+
+```
+
+## Tidy bird data based on environmental data ##
+
+```{r}
+
+# identify cells lacking environmental data
+
+# prepare raster data with cell coordinates
+env_dat <- as.data.frame(covars, xy = TRUE)
+
+# identify raster cells per site
+cellID <- as.data.frame(terra::cellFromXY(covars, as.matrix(dplyr::select(bto_xy, x, y)))) %>%
+  setNames("cell_id")
+
+cell_info <- dplyr::bind_cols(cellID, bto_xy)
+
+# join biological locations to environmental data
+bto_env <- dplyr::left_join(bto_xy, env_dat, by = c("x", "y")) %>% 
+  # drop cells with missing env data
+  dplyr::filter(!is.na(tri))
+
+# remove cells with missing env data from biological data
+bto <- bto_comb %>% 
+  # remove cells with missing env data from biological data
+  dplyr::filter(cell %in% bto_env$cell) %>% 
+  # join sample coverage data
+  dplyr::left_join(inxt_df, by = "cell") %>% 
+  # filter out sites with no sample coverage estimate
+  dplyr::filter(!is.na(SC)) %>% 
+  # add cell information (x, y)
+  dplyr::left_join(cell_info, by = c("cell", "x", "y"))
+
+# # save: bto
+# saveRDS(bto, "data/birds/out_data/bto.rds")
+
+```
+
+## GDM analysis ##
+
+```{r}
+
+# GDM
+
+# weights based on sample coverage
+weig <- dplyr::select(bto, cell_id, weights = SC) %>%
+  dplyr::distinct(cell_id, .keep_all = TRUE)
+
+# format site pair for gdm
+# weighted by sample coverage
+gdmTab <- gdm::formatsitepair(bto, bioFormat = 2, dist = "jaccard", XColumn = "x", YColumn = "y", abundance = FALSE, sppColumn = "species", siteColumn = "cell_id", predData = raster::stack(covars), weightType = "custom", custWeights = weig, verbose = TRUE)
+# Site-pair table created with 9863461 rows (4442 unique sites) and 26 columns (10 environmental variables)
+# length(unique(bto$species)) = 219 species
+
+# run gdm
+gdmr <- gdm::gdm(gdmTab, geo = TRUE)
+
+# split into parts, birds are large
+part1 <- gdmr[1:14]
+part2 <- gdmr[15]
+part3 <- gdmr[16]
+
+saveRDS(part1, "data/birds/out_data/birds_gdmr_1.rds")
+saveRDS(part2, "data/birds/out_data/birds_gdmr_2.rds")
+saveRDS(part3, "data/birds/out_data/birds_gdmr_3.rds")
+
+# part1 <- readRDS("data/birds/out_data/birds_gdmr_1.rds")
+# part2 <- readRDS("data/birds/out_data/birds_gdmr_2.rds")
+# part3 <- readRDS("data/birds/out_data/birds_gdmr_3.rds")
+
+# gdmr <- c(part1, part2, part3)
+
+# summary(gdmr)
+# 
+# plot(gdmr)
+
+```
+

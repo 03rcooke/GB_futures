@@ -1,0 +1,1618 @@
+---
+title: "gdm_cross_tax"
+author: "Rob Cooke"
+date: "08/06/2021"
+output: html_notebook
+---
+
+# Run all chunks in gdm_start above this "Above from here just for models"
+
+# Setup
+
+```{r}
+
+# load models
+gdmr_plants <- readRDS(paste0("data/plants/out_data/plants_gdmr.rds"))
+gdmr_butterflies <- readRDS(paste0("data/butterflies/out_data/butterflies_gdmr.rds"))
+gdmr_birds <- readRDS(paste0("data/birds/out_data/birds_gdmr.rds"))
+
+# helper function - see Mokany et al., 2022
+# function to remove intercept from gdm predictions
+remove_int <- function(mod, pred){
+  adjust <- 0 - log(1 - pred) - mod$intercept
+  
+  adjust_diss <- 1 - exp(0 - adjust)
+  
+  return(adjust_diss)
+}
+
+# first letter to uppercase
+firstup <- function(x) {
+  substr(x, 1, 1) <- toupper(substr(x, 1, 1))
+  x
+}
+
+# jaccard similarity index
+jaccard_index <- function(a, b) {
+  intersection = sum(a == 1 & b == 1)
+  union = sum(a == 1 | b == 1)
+  return(intersection / union)
+}
+
+# assumed species area relationship following Di Marco et al (2019) and references contained within
+z <- 0.25
+
+# baseline year
+baseline_yr <- 2015
+
+# phylopic icons
+plant_icon <- rphylopic::get_phylopic(uuid = "619a7cc7-7abc-4724-912f-ab7346f095ac") # english oak
+butter_icon <- rphylopic::get_phylopic(uuid = "5aeaf558-3c48-4173-83b4-dbf2846f8d75") # common blue
+bird_icon <- rphylopic::get_phylopic(uuid = "673ec775-5d61-46dd-8606-a21edcbbb823") # buzzard
+
+# blank icon plots
+p_plant <- ggplot2::ggplot() +
+  rphylopic::add_phylopic(x = 0, y = 0, img = plant_icon) +
+  ggplot2::theme_void()
+p_butter <- ggplot2::ggplot() +
+  rphylopic::add_phylopic(x = 0, y = 0, img = butter_icon) +
+  ggplot2::theme_void()
+p_bird <- ggplot2::ggplot() +
+  rphylopic::add_phylopic(x = 0, y = 0, img = bird_icon) +
+  ggplot2::theme_void()
+
+## Number of species
+
+# plants
+npms <- readRDS("data/plants/out_data/npms.rds")
+
+length(unique(npms$species))
+# 1002
+
+# butterflies
+bms <- readRDS("data/butterflies/out_data/bms.rds")
+
+length(unique(bms$species))
+# 56
+
+# birds
+bto <- readRDS("data/birds/out_data/bto.rds")
+
+length(unique(bto$species))
+# 219
+
+tax <- c("plants", "butterflies", "birds")
+scenarios <- c("rcp26_2070", "rcp85_2070")
+
+```
+
+# Disappearing and novel
+
+```{r}
+
+load_disnov <- function(tax, scenarios) {
+  
+  # disappearing
+  dis_df <- lapply(tax, function(t) {
+    
+    lapply(scenarios, function(s) {
+      
+      df <- readRDS(paste0("data/", t, "/out_data/disappear/", t, "_disappear_", s, ".rds")) %>% 
+        # convert to percentages
+        dplyr::mutate(dplyr::across(c(disappearing_min, disappearing_mean, disappearing_median), ~. * 100)) %>% 
+        dplyr::mutate(rcp = s)
+      
+    }) %>% 
+      # bind across scenarios
+      dplyr::bind_rows() %>% 
+      # add taxa name
+      dplyr::mutate(tax = t)
+    
+  }) %>% 
+    # bind across taxa
+    dplyr::bind_rows()
+  
+  # novel
+  nov_df <- lapply(tax, function(t) {
+    
+    lapply(scenarios, function(s) {
+      
+      df <- readRDS(paste0("data/", t, "/out_data/novel/", t, "_novel_", s, ".rds")) %>% 
+        # convert to percentages
+        dplyr::mutate(dplyr::across(c(novel_min, novel_mean, novel_median), ~. * 100)) %>% 
+        dplyr::mutate(rcp = s)
+      
+    }) %>% 
+      # bind across scenarios
+      dplyr::bind_rows() %>% 
+      # add taxa name
+      dplyr::mutate(tax = t)
+    
+  }) %>% 
+    # bind across taxa
+    dplyr::bind_rows()
+  
+  comb_df <- dplyr::left_join(dis_df, nov_df, by = c("x", "y", "rcp", "tax"))
+  
+}
+
+comb_disnov <- load_disnov(tax = tax, scenarios = scenarios) %>% 
+  # neat names
+  dplyr::mutate(tax = dplyr::recode(tax, plants = "Plants", butterflies = "Butterflies", birds = "Birds")) %>% 
+  dplyr::mutate(rcp = dplyr::recode(rcp, rcp26_2070 = "RCP2.6", rcp85_2070 = "RCP8.5")) %>% 
+  # convert to factor
+  dplyr::mutate(tax = factor(tax, levels = c("Plants", "Butterflies", "Birds"))) %>% 
+  dplyr::mutate(rcp = factor(rcp, levels = rev(c("RCP2.6", "RCP8.5"))))
+
+```
+
+## Colocation bivariate disappearing novel
+
+```{r}
+
+dim_set <- 2
+col_bi <- "DkBlue2"
+# colours
+# # biscale::bi_pal(pal = "DkBlue2", dim = 2, preview = FALSE)
+
+# threshold
+thresh <- 10
+
+# text label size
+lab_size <- 4
+
+# function for bivariate maps
+coloc_map  <- function(df, rcp_name, tax_name, area = TRUE, icon = TRUE, title) {
+  
+  # subset df
+  df_sub <- df %>% 
+    dplyr::filter(rcp == rcp_name, tax == firstup(tax_name)) %>%
+    dplyr::mutate(analogue_dis = dplyr::recode(analogue_dis, analogue = 0, dis = 1),
+                  analogue_nov = dplyr::recode(analogue_nov, analogue = 0, nov = 1))
+  
+  # calculate percentages
+  
+  # area covered by disappearing bioclimates
+  # disappearing bioclimates / all bioclimates
+  area_dis <- (table(df_sub$analogue_dis)[2] / sum(table(df_sub$analogue_dis))) * 100
+  
+  # area covered by novel bioclimates
+  # novel bioclimates / all bioclimates
+  area_nov <- (table(df_sub$analogue_nov)[2] / sum(table(df_sub$analogue_nov))) * 100
+  
+  # jaccard similarity
+  jac <- jaccard_index(df_sub$analogue_dis, df_sub$analogue_nov)
+  
+  # phylopic icon
+  if(icon == TRUE) {
+    
+    if(tax_name == "plants") icon_pic <- plant_icon
+    if(tax_name == "butterflies") icon_pic <- butter_icon
+    if(tax_name == "birds") icon_pic <- bird_icon
+    
+  }
+  
+  # map
+  map <- ggplot2::ggplot(df_sub, ggplot2::aes(x = x, y = y, fill = bi_class)) +
+    ggplot2::geom_raster() +
+    ggplot2::coord_equal() +
+    # bivariate fill
+    biscale::bi_scale_fill(pal = col_bi, dim = dim_set, rotate_pal = FALSE) +
+    # add jaccard similarity
+    ggplot2::geom_text(x = 120000, y = 450000, label = paste("J", sprintf("%.2f", jac)), size = lab_size) +
+    # add area covered by disappearing bioclimates
+    {if(area == TRUE) ggplot2::geom_text(x = 520000, y = 800000, label = paste0(sprintf("%.0f", area_dis), "%"), size = lab_size, colour = "#ad5b9c")} +
+    # add area covered by novel bioclimates
+    {if(area == TRUE) ggplot2::geom_text(x = 520000, y = 700000, label = paste0(sprintf("%.0f", area_nov), "%"), size = lab_size, colour = "#52b6b6")} +
+    # add taxa icon
+    {if(icon == TRUE) rphylopic::add_phylopic(icon_pic, x = 110000, y = 1110000, ysize = 110000)} +
+    # labels
+    ggplot2::labs(title = title) +
+    # theme
+    ggplot2::theme_void() +
+    ggplot2::theme(legend.position = "none",
+                   plot.title = ggplot2::element_text(size = 10, hjust = 0.5, face = "bold"))
+  
+  return(map)
+  
+}
+
+# thresholded colocation map
+comb_disnov_fct <- comb_disnov %>%
+  dplyr::mutate(analogue_dis = dplyr::case_when(
+    disappearing_min < thresh ~ "analogue",
+    disappearing_min >= thresh ~ "dis"
+  )) %>%
+  dplyr::mutate(analogue_nov = dplyr::case_when(
+    novel_min < thresh ~ "analogue",
+    novel_min >= thresh ~ "nov"
+  )) %>%
+  dplyr::mutate(analogue_dis = factor(analogue_dis, levels = c("analogue", "dis")),
+                analogue_nov = factor(analogue_nov, levels = c("analogue", "nov")))
+
+# create bivariate classes
+coloc <- biscale::bi_class(comb_disnov_fct, x = analogue_nov, y = analogue_dis, style = "quantile", dim = dim_set)
+
+coloc_leg <- biscale::bi_legend(pal = col_bi,
+                    dim = dim_set,
+                    xlab = "Novel",
+                    ylab = "Disappearing",
+                    size = 12)
+
+# maps
+clc_pl_26 <- coloc_map(df = coloc, rcp_name = "RCP2.6", tax_name = "plants", title = "RCP2.6")
+clc_pl_85 <- coloc_map(df = coloc, rcp_name = "RCP8.5", tax_name = "plants", title = "RCP8.5")
+
+clc_bu_26 <- coloc_map(df = coloc, rcp_name = "RCP2.6", tax_name = "butterflies", title = "RCP2.6")
+clc_bu_85 <- coloc_map(df = coloc, rcp_name = "RCP8.5", tax_name = "butterflies", title = "RCP8.5")
+
+clc_bi_26 <- coloc_map(df = coloc, rcp_name = "RCP2.6", tax_name = "birds", title = "RCP2.6")
+clc_bi_85 <- coloc_map(df = coloc, rcp_name = "RCP8.5", tax_name = "birds", title = "RCP8.5")
+
+# combine plots
+coloc_comb <- cowplot::plot_grid(
+  cowplot::plot_grid(clc_pl_26,  clc_bu_26, clc_bi_26, nrow = 1, labels = c("A", "", "")),
+  cowplot::plot_grid(clc_pl_85, clc_bu_85, clc_bi_85, nrow = 1, labels = c("B", "", "")),
+  cowplot::plot_grid(NULL, coloc_leg, NULL, nrow = 1, rel_widths = c(1, 1, 1)),
+  nrow = 3, rel_heights = c(1, 1, 0.5)) +
+  ggplot2::theme(plot.background = element_rect(fill = "white", colour = "white"))
+
+# # save
+# cowplot::save_plot(paste0("outputs/coloc_comb_min_thresh_", thresh, ".png"), coloc_comb, base_height = 9, base_width = 6.4, dpi = 300)
+
+# stats
+
+cdf <- comb_disnov_fct %>% 
+  dplyr::mutate(analogue_dis = dplyr::recode(analogue_dis, analogue = 0, dis = 1),
+                analogue_nov = dplyr::recode(analogue_nov, analogue = 0, nov = 1))
+
+plants_85 <- dplyr::filter(cdf, tax == "Plants", rcp == "RCP8.5")
+butter_85 <- dplyr::filter(cdf, tax == "Butterflies", rcp == "RCP8.5")
+birds_85 <- dplyr::filter(cdf, tax == "Birds", rcp == "RCP8.5")
+
+# # birds vs butterflies
+# jac <- jaccard_index(butter_85$analogue_dis, birds_85$analogue_dis)
+# jac
+
+# contingency for plants
+table(plants_85$analogue_dis, plants_85$analogue_nov)
+# 0 = analogue, 1 = dis/nov
+# rows = dis, cols = nov
+
+table(birds_85$analogue_dis, birds_85$analogue_nov)
+
+conditional_probability <- function(a, b) {
+  intersection = sum(a == 1 & b == 1)
+  a_occurrences = sum(a == 1)
+  return(intersection / a_occurrences)
+}
+
+cond <- conditional_probability(plants_85$analogue_dis, plants_85$analogue_nov)
+cond
+
+cond <- conditional_probability(butter_85$analogue_dis, butter_85$analogue_nov)
+cond
+
+cond <- conditional_probability(birds_85$analogue_dis, birds_85$analogue_nov)
+cond
+
+```
+
+# Species heading for extinction
+
+## Trends in extinction
+
+```{r}
+
+n_spp_plants <- npms %>% 
+  dplyr::distinct(species) %>% 
+  nrow(.)
+n_spp_butterflies <- bms %>% 
+  dplyr::distinct(species) %>% 
+  nrow(.)
+n_spp_birds <- bto %>% 
+  dplyr::distinct(species) %>% 
+  nrow(.)
+
+# scenario names
+sc_nms <- c("rcp26_ssp1_2030", "rcp26_ssp1_2050", "rcp26_ssp1_2070", "rcp45_ssp2_2030", "rcp45_ssp2_2050", "rcp45_ssp2_2070", "rcp45_ssp4_2030", "rcp45_ssp4_2050", "rcp45_ssp4_2070", "rcp60_ssp3_2030", "rcp60_ssp3_2050", "rcp60_ssp3_2070", "rcp85_ssp2_2030", "rcp85_ssp2_2050", "rcp85_ssp2_2070", "rcp85_ssp5_2030", "rcp85_ssp5_2050", "rcp85_ssp5_2070")
+
+ext_reg <- function(tax) {
+  ext_out <- lapply(c("baseline_2020", sc_nms), function(scenario_name) {
+    
+    # load extinction regional estimate for each scenario
+    ext_reg_df <- readRDS(paste0("data/", tax, "/out_data/ext_reg/", tax, "_", scenario_name, ".rds"))
+    
+  }) %>% 
+    # bind dataframes
+    dplyr::bind_rows() %>% 
+    # add combined rcp_ssp
+    dplyr::mutate(rcp_ssp = paste0("rcp", rcp, "_ssp", ssp)) %>% 
+    # convert to factor
+    dplyr::mutate(rcp_ssp = factor(rcp_ssp, levels = c("rcpbaseline_sspbaseline", "rcp26_ssp1", "rcp45_ssp2", "rcp45_ssp4", "rcp60_ssp3", "rcp85_ssp2", "rcp85_ssp5")),
+                  rcp = as.factor(rcp),
+                  ssp = as.factor(ssp)) %>% 
+    # neat labels
+    dplyr::mutate(neat = dplyr::recode(rcp_ssp, rcpbaseline_sspbaseline = "Baseline", rcp26_ssp1 = "RCP2.6-SSP1", rcp45_ssp2 = "RCP4.5-SSP2", rcp45_ssp4 = "RCP4.5-SSP4", rcp60_ssp3 = "RCP6.0-SSP3", rcp85_ssp2 = "RCP8.5-SSP2", rcp85_ssp5 = "RCP8.5-SSP5")) %>% 
+    # persistence instead of extinction
+    dplyr::mutate(pers_reg = (1 - ext_reg) * 100)
+  
+}
+
+ext_plants <- ext_reg(tax = "plants") %>% 
+  dplyr::mutate(n_spp = n_spp_plants) %>% 
+  dplyr::mutate(comm_ext = ((100 - pers_reg) / 100) * n_spp)
+ext_butterflies <- ext_reg(tax = "butterflies") %>% 
+  dplyr::mutate(n_spp = n_spp_butterflies) %>% 
+  dplyr::mutate(comm_ext = ((100 - pers_reg) / 100) * n_spp)
+ext_birds <- ext_reg(tax = "birds") %>% 
+  dplyr::mutate(n_spp = n_spp_birds) %>% 
+  dplyr::mutate(comm_ext = ((100 - pers_reg) / 100) * n_spp)
+
+# # percentage differences
+# # plants
+# (dplyr::filter(ext_plants, rcp_ssp == "rcp85_ssp5" & year == 2070)$comm_ext - dplyr::filter(ext_plants, rcp_ssp == "rcp26_ssp1" & year == 2070)$comm_ext) / dplyr::filter(ext_plants, rcp_ssp == "rcp85_ssp5" & year == 2070)$comm_ext
+# # butterflies
+# (dplyr::filter(ext_butterflies, rcp_ssp == "rcp85_ssp5" & year == 2070)$comm_ext - dplyr::filter(ext_butterflies, rcp_ssp == "rcp26_ssp1" & year == 2070)$comm_ext) / dplyr::filter(ext_butterflies, rcp_ssp == "rcp85_ssp5" & year == 2070)$comm_ext
+# # birds
+# (dplyr::filter(ext_birds, rcp_ssp == "rcp85_ssp5" & year == 2070)$comm_ext - dplyr::filter(ext_birds, rcp_ssp == "rcp26_ssp1" & year == 2070)$comm_ext) / dplyr::filter(ext_birds, rcp_ssp == "rcp85_ssp5" & year == 2070)$comm_ext
+
+ext_pal <- c("black", "#364B9A", "#6EA6CD", "#C2E4EF", "#FEDA8B", "#DD3D2D", "#A50026")
+
+# limits for plot
+pers_reg_min <- floor(min(c(ext_plants$pers_reg, ext_butterflies$pers_reg, ext_birds$pers_reg)))
+pers_reg_max <- ceiling(max(c(ext_plants$pers_reg, ext_butterflies$pers_reg, ext_birds$pers_reg)))
+
+ext_plot <- function(df, icon = TRUE, leg = FALSE) {
+  
+  # phylopic icon
+  if(icon == TRUE) {
+    
+    if(unique(df$tax) == "plants") icon_pic <- plant_icon
+    if(unique(df$tax) == "butterflies") icon_pic <- butter_icon
+    if(unique(df$tax) == "birds") icon_pic <- bird_icon
+    
+  }
+  
+  ext_plot_out <- ggplot2::ggplot(data = df, ggplot2::aes(x = year, y = pers_reg, colour = neat)) +
+    # baseline
+    ggplot2::geom_hline(yintercept = dplyr::filter(df, rcp == "baseline")$pers_reg, lty = 3) +
+    # points
+    ggplot2::geom_point(size = 1.2) +
+    # lines
+    ggplot2::geom_line(lty = 1, lwd = 0.5) +
+    ggplot2::coord_cartesian(xlim = c(baseline_yr, 2070), clip = "off") +
+    # add taxa icon
+    {if(icon == TRUE) rphylopic::add_phylopic(icon_pic, x = 2018.5, y = pers_reg_max, ysize = 1.5)} +
+    ggplot2::scale_x_continuous(breaks = c(2030, 2050, 2070)) +
+    ggplot2::scale_y_continuous(name = "Percent of\nspecies persisting", limits = c(pers_reg_min, pers_reg_max), sec.axis = ggplot2::sec_axis(trans = ~ ((100 - .) / 100) * df$n_spp, name = "Species heading\nfor extinction")) +
+    #ggplot2::labs(title = firstup(df$tax)) +
+    ggplot2::scale_colour_manual(values = ext_pal, guide = ggplot2::guide_legend(ncol = 2)) +
+    # legend
+    {if(leg == FALSE) ggplot2::theme(legend.position = "none")} +
+    ggplot2::theme(axis.title.x = ggplot2::element_blank(),
+                   # centre title
+                   plot.title = ggplot2::element_text(hjust = 0.5),
+                   legend.title = ggplot2::element_blank())
+  
+}
+
+ext_plot_plants <- ext_plot(df = ext_plants)
+ext_plot_butterflies <- ext_plot(df = ext_butterflies)
+ext_plot_birds <- ext_plot(df = ext_birds)
+
+ext_plot_leg <- cowplot::get_legend(ext_plot(df = ext_plants, leg = TRUE))
+
+```
+
+## Spatial extinction
+
+```{r}
+
+# function to map species heading for extinction under land-use change and climate change
+pers_map <- function(scenario_name, tax, lims, yr = FALSE, med = FALSE, icon = TRUE, leg = FALSE) {
+  
+  # load data
+  pers_df <- readRDS(paste0("data/", tax, "/out_data/pers/", tax, "_", scenario_name, ".rds")) %>%   
+    # expected persistence using species-area relationship
+    # pitest in Di Marco et al., 2019 equation 3
+    dplyr::mutate(pers = (sim_hc / sim_pris) ^ z) %>% 
+    # extinction risk
+    dplyr::mutate(extinct = 1 - pers)
+  
+  geo_mean <- pers_df %>% 
+    # cell weight
+    # w in Di Marco et al., 2019 equation 6
+    dplyr::mutate(cell_weight = 1 / sim_pris) %>% 
+    # numerator see Mokany et al., 2022 Supporting Information Appendix S1 - section 2.10
+    dplyr::mutate(numerator = pers * cell_weight) %>% 
+    # numerator in geometric mean see Di Marco et al., 2019 equation 5
+    dplyr::mutate(numerator_ln = log(pers) * cell_weight)
+  
+  # regional estimate of species committed to extinction
+  ext_reg <- 100 * (1 - exp(sum(geo_mean$numerator_ln) / sum(geo_mean$cell_weight)))
+  
+  splt <- unlist(strsplit(scenario_name, "_"))
+  
+  # generate title for plot
+  if(splt[[1]] == "baseline") {
+    
+    title <- ""
+    
+  } else {
+    
+    if(yr == FALSE) {
+      
+      title <- paste0("RCP", unlist(strsplit(gsub("\\D", "", splt[[1]]), ""))[[1]], ".", unlist(strsplit(gsub("\\D", "", splt[[1]]), ""))[[2]], "-SSP", gsub("\\D", "", splt[[2]]))
+      
+    } else {
+      
+      title <- paste0("RCP", unlist(strsplit(gsub("\\D", "", splt[[1]]), ""))[[1]], ".", unlist(strsplit(gsub("\\D", "", splt[[1]]), ""))[[2]], "-SSP", gsub("\\D", "", splt[[2]]), "\n", as.numeric(splt[[3]]) - 10, "-", as.numeric(splt[[3]]) + 10)
+      
+    }
+    
+  }
+  
+  pers_df$tempvar <- title
+  
+  # phylopic icon
+  if(icon == TRUE) {
+    
+    if(tax == "plants") icon_pic <- plant_icon
+    if(tax == "butterflies") icon_pic <- butter_icon
+    if(tax == "birds") icon_pic <- bird_icon
+    
+  }
+  
+  # map
+  pers_out <- ggplot2::ggplot(pers_df, ggplot2::aes(x = x, y = y, fill = 100 * extinct)) +
+    ggplot2::geom_raster() +
+    ggplot2::coord_equal(ylim = c(NA, 1130000)) +
+    # add taxa icon
+    {if(icon == TRUE) rphylopic::add_phylopic(icon_pic, x = 160000, y = 1080000, ysize = 110000)} +
+    ggplot2::labs(fill = "Percent\nof species\nheading\nfor extinction") +
+    scico::scale_fill_scico(palette = "bilbao", na.value = "grey", limits = lims, direction = -1) +
+    ggplot2::theme_void()
+  
+  # add median
+  if(med == TRUE) {
+    pers_out <- pers_out + ggplot2::geom_text(x = 500000, y = 700000, label = round(ext_reg, digits = 0))
+  }
+  
+  # facet and theme based on yr
+  if(yr == FALSE) {
+    pers_out <- pers_out + ggplot2::facet_grid(. ~ tempvar) +
+      ggplot2::theme(plot.title = ggplot2::element_blank(),
+                     strip.text = ggplot2::element_text(size = 10, colour = "white", margin = ggplot2::margin(5, 0, 5, 0, "pt")))
+  } else {
+    pers_out <- pers_out + ggplot2::labs(title = title) +
+      ggplot2::theme(plot.title = ggplot2::element_text(hjust = 0.5))
+  }
+  
+  # legend
+  if(leg == FALSE) {
+    pers_out <- pers_out + ggplot2::theme(legend.position = "none")
+  }
+  
+  return(pers_out)
+  
+}
+
+# limits across plots
+lims <- c((100 * 0.036), (100 * 0.242))
+# limits
+# pmaps <- lapply(sc_nms, function(x) pers_map(scenario_name = x, lims = lims, tax = "birds", leg = FALSE))
+# min(sapply(1:length(pmaps), function(x) min(pmaps[[x]]$data$extinct)))
+# max(sapply(1:length(pmaps), function(x) max(pmaps[[x]]$data$extinct)))
+# plants = 0.03735299, 0.2415008
+# butterflies = 0.07160245, 0.159003
+# birds = 0.03665586, 0.2239393
+
+pmap_plants_rcp85_ssp5_2070 <- pers_map(scenario_name = "rcp85_ssp5_2070", lims = lims, tax = "plants", leg = FALSE, yr = FALSE) +
+  ggplot2::theme(strip.background = ggplot2::element_rect(fill = "#A50026", colour = "#A50026"))
+pmap_plants_rcp26_ssp1_2070 <- pers_map(scenario_name = "rcp26_ssp1_2070", lims = lims, tax = "plants", leg = FALSE, yr = FALSE) +
+  ggplot2::theme(strip.background = ggplot2::element_rect(fill = "#364B9A", colour = "#364B9A"))
+
+pmap_butterflies_rcp85_ssp5_2070 <- pers_map(scenario_name = "rcp85_ssp5_2070", lims = lims, tax = "butterflies", leg = FALSE, yr = FALSE) +
+  ggplot2::theme(strip.background = ggplot2::element_rect(fill = "#A50026", colour = "#A50026"))
+pmap_butterflies_rcp85_ssp2_2070 <- pers_map(scenario_name = "rcp85_ssp2_2070", lims = lims, tax = "butterflies", leg = FALSE, yr = FALSE) +
+  ggplot2::theme(strip.background = ggplot2::element_rect(fill = "#DD3D2D", colour = "#DD3D2D"))
+
+pmap_birds_rcp85_ssp5_2070 <- pers_map(scenario_name = "rcp85_ssp5_2070", lims = lims, tax = "birds", leg = FALSE, yr = FALSE) +
+  ggplot2::theme(strip.background = ggplot2::element_rect(fill = "#A50026", colour = "#A50026"))
+pmap_birds_rcp45_ssp2_2070 <- pers_map(scenario_name = "rcp45_ssp2_2070", lims = lims, tax = "birds", leg = FALSE, yr = FALSE) +
+  ggplot2::theme(strip.background = ggplot2::element_rect(fill = "#6EA6CD", colour = "#6EA6CD"))
+
+# legend across plots
+pmap_leg <- cowplot::get_legend(pers_map(scenario_name = "rcp26_ssp1_2070", lims = lims, tax = "plants", leg = TRUE) +
+                                  ggplot2::labs(fill = "Percent of species\nheading for extinction") +
+                                  scico::scale_fill_scico(palette = "bilbao", na.value = "grey", limits = lims, direction = 1, guide = ggplot2::guide_colorbar(title.position = "top", title.hjust = 0.5)) +
+                                  ggplot2::theme(legend.position = "bottom")) 
+
+```
+
+## Combined trends and spatial extinction
+
+```{r}
+
+# extra titles
+worst <- cowplot::ggdraw() + cowplot::draw_label("'Worst' future", size = 14)
+
+best <- cowplot::ggdraw() + cowplot::draw_label("'Best' future", size = 14)
+
+ext_comb <- cowplot::plot_grid(
+  cowplot::plot_grid(
+    cowplot::plot_grid(NULL, ext_plot_plants, nrow = 2, rel_heights = c(0.1, 1)), 
+    cowplot::plot_grid(worst, pmap_plants_rcp85_ssp5_2070, nrow = 2, rel_heights = c(0.2, 1)), 
+    cowplot::plot_grid(best, pmap_plants_rcp26_ssp1_2070, nrow = 2, rel_heights = c(0.2, 1)), 
+    ncol = 3, rel_widths = c(1, 0.5, 0.5)),
+  cowplot::plot_grid(ext_plot_butterflies, pmap_butterflies_rcp85_ssp5_2070, pmap_butterflies_rcp85_ssp2_2070, ncol = 3, rel_widths = c(1, 0.5, 0.5)),
+  cowplot::plot_grid(ext_plot_birds, pmap_birds_rcp85_ssp5_2070, pmap_birds_rcp45_ssp2_2070, ncol = 3, rel_widths = c(1, 0.5, 0.5)),
+  cowplot::plot_grid(cowplot::plot_grid(NULL, ext_plot_leg, NULL, ncol = 3, rel_widths = c(0.2, 1, 0.2)), pmap_leg, ncol = 2, rel_widths = c(1, 1)),
+labels = c("A", "B", "C", ""), nrow = 4, rel_heights = c(1.2, 1, 1, 0.5)) +
+  ggplot2::theme(plot.background = ggplot2::element_rect(fill = "white", colour = "white"))
+
+# # colours
+# scales::show_col(scico::scico(9, palette = "bilbao"))
+
+# save
+cowplot::save_plot("outputs/ext_comb.png", ext_comb, base_height = 8, base_width = 9, dpi = 600)
+
+```
+
+# Supplementary - Colocation RCP4.5 and RCP6.0
+
+```{r}
+
+comb_disnov_supp <- load_disnov(tax = tax, scenarios = c("rcp45_2070", "rcp60_2070")) %>% 
+  # neat names
+  dplyr::mutate(tax = dplyr::recode(tax, plants = "Plants", butterflies = "Butterflies", birds = "Birds")) %>% 
+  dplyr::mutate(rcp = dplyr::recode(rcp, rcp45_2070 = "RCP4.5", rcp60_2070 = "RCP6.0")) %>% 
+  # convert to factor
+  dplyr::mutate(tax = factor(tax, levels = c("Plants", "Butterflies", "Birds"))) %>% 
+  dplyr::mutate(rcp = factor(rcp, levels = rev(c("RCP4.5", "RCP6.0"))))
+
+dim_set <- 2
+col_bi <- "DkBlue2"
+
+# threshold
+thresh <- 10
+
+# text label size
+lab_size <- 4
+
+# thresholded colocation map
+comb_disnov_fct_supp <- comb_disnov_supp %>%
+  dplyr::mutate(analogue_dis = dplyr::case_when(
+    disappearing_min < thresh ~ "analogue",
+    disappearing_min >= thresh ~ "dis"
+  )) %>%
+  dplyr::mutate(analogue_nov = dplyr::case_when(
+    novel_min < thresh ~ "analogue",
+    novel_min >= thresh ~ "nov"
+  )) %>%
+  dplyr::mutate(analogue_dis = factor(analogue_dis, levels = c("analogue", "dis")),
+                analogue_nov = factor(analogue_nov, levels = c("analogue", "nov")))
+
+# create bivariate classes
+coloc_supp <- biscale::bi_class(comb_disnov_fct_supp, x = analogue_nov, y = analogue_dis, style = "quantile", dim = dim_set)
+
+coloc_leg_supp <- biscale::bi_legend(pal = col_bi,
+                    dim = dim_set,
+                    xlab = "Novel",
+                    ylab = "Disappearing",
+                    size = 12)
+
+# maps
+clc_pl_45 <- coloc_map(df = coloc_supp, rcp_name = "RCP4.5", tax_name = "plants", title = "RCP4.5")
+clc_pl_60 <- coloc_map(df = coloc_supp, rcp_name = "RCP6.0", tax_name = "plants", title = "RCP6.0")
+
+clc_bu_45 <- coloc_map(df = coloc_supp, rcp_name = "RCP4.5", tax_name = "butterflies", title = "RCP4.5")
+clc_bu_60 <- coloc_map(df = coloc_supp, rcp_name = "RCP6.0", tax_name = "butterflies", title = "RCP6.0")
+
+clc_bi_45 <- coloc_map(df = coloc_supp, rcp_name = "RCP4.5", tax_name = "birds", title = "RCP4.5")
+clc_bi_60 <- coloc_map(df = coloc_supp, rcp_name = "RCP6.0", tax_name = "birds", title = "RCP6.0")
+
+# combine plots
+coloc_comb_supp <- cowplot::plot_grid(
+  cowplot::plot_grid(clc_pl_45,  clc_bu_45, clc_bi_45, nrow = 1, labels = c("A", "", "")),
+  cowplot::plot_grid(clc_pl_60, clc_bu_60, clc_bi_60, nrow = 1, labels = c("B", "", "")),
+  cowplot::plot_grid(NULL, coloc_leg_supp, NULL, nrow = 1, rel_widths = c(1, 1, 1)),
+  nrow = 3, rel_heights = c(1, 1, 0.5)) +
+  ggplot2::theme(plot.background = element_rect(fill = "white", colour = "white"))
+
+# # save
+# cowplot::save_plot(paste0("outputs/coloc_comb_min_supp_thresh_", thresh, ".png"), coloc_comb_supp, base_height = 9, base_width = 6.4, dpi = 300)
+
+```
+
+# Supplementary - Covariates
+
+```{r}
+
+# prepare raster data with cell coordinates
+env_dat_df <- as.data.frame(covars, xy = TRUE) %>% 
+  # drop cells with missing env data
+  dplyr::filter(!is.na(tri))
+
+# lookup table for neat variable names
+lookup <- data.frame(var = colnames(env_dat_df)[3:ncol(env_dat_df)], var_nam = c("Topographic\nruggedness\nindex", "Topographic\nwetness\nindex", "Soil pH", "Annual\nminimum\ntemperature", "Annual\nmaximum\ntemperature", "Maximum\nmonthly\ndiurnal\ntemperature\nrange", "Annual\nprecipitation", "Precipitation\nseasonality", "Potential\nevapotranspiration\nwith interception\ncorrection of\ndriest month", "Annual\nsurface\ndownwelling\nshortwave\nradiation"))
+# maybe put units in table or legend
+
+# function to produce maps of environmental variables
+env_plots <- function(x) {
+  
+  # variable
+  var <- lookup[x, 1]
+  # neat variable name
+  var_nam <- lookup[x, 2]
+  
+  # create plot
+  p <- ggplot2::ggplot(data = env_dat_df, ggplot2::aes(x = x, y = y, fill = .data[[var]])) +
+    # add environmental layer
+    ggplot2::geom_raster() +
+    # equal coordinates
+    ggplot2::coord_equal() +
+    # viridis colour palette
+    ggplot2::scale_fill_viridis_c() +
+    ggplot2::labs(fill = var_nam) +
+    # remove axes
+    ggplot2::theme_void()
+  
+}
+
+# generate plots
+env_out <- lapply(1:nrow(lookup), env_plots)
+
+# # Split
+# 
+# # combine plots
+# env_org_fhalf <- cowplot::plot_grid(plotlist = env_out[1:5], ncol = 2)
+# env_org_shalf <- cowplot::plot_grid(plotlist = env_out[6:10], ncol = 2)
+# 
+# # save plots
+# cowplot::save_plot("outputs/env_covs_fhalf.png", env_org_fhalf, base_height = 10, base_width = 7.5)
+# cowplot::save_plot("outputs/env_covs_shalf.png", env_org_shalf, base_height = 10, base_width = 7.5)
+
+# One page
+env_org_all <- cowplot::plot_grid(plotlist = env_out, ncol = 3) +
+  ggplot2::theme(plot.background = element_rect(fill = "white", colour = "white"))
+
+# save plot
+cowplot::save_plot("outputs/env_covs_all.png", env_org_all, base_height = 10, base_width = 9.6)
+
+```
+
+# Supplementary - Sample coverage
+
+```{r}
+
+npms_sc <- readRDS("data/plants/out_data/plants_inxt_df.rds")
+bms_sc <- readRDS("data/butterflies/out_data/butterflies_inxt_df.rds")
+bto_sc <- readRDS("data/birds/out_data/birds_inxt_df.rds")
+
+sc_hist_plant <- ggplot2::ggplot(data = npms_sc, ggplot2::aes(x = SC)) +
+  rphylopic::add_phylopic(img = plant_icon, x = 0.32, y = 160, ysize = 20) +
+  ggplot2::geom_histogram(binwidth = 0.1, boundary = 0) +
+  ggplot2::labs(x = "Sample coverage", y = "Number of grid cells") +
+  ggplot2::theme(strip.background = element_blank(),
+                 plot.background = element_rect(fill = "white", colour = "white"))
+
+sc_hist_butter <- ggplot2::ggplot(data = bms_sc, ggplot2::aes(x = SC)) +
+  rphylopic::add_phylopic(img = butter_icon, x = 0.18, y = 750, ysize = 80) +
+  ggplot2::geom_histogram(binwidth = 0.1, boundary = 0) +
+  ggplot2::labs(x = "Sample coverage", y = "Number of grid cells") +
+  ggplot2::theme(strip.background = element_blank(),
+                 plot.background = element_rect(fill = "white", colour = "white"))
+
+sc_hist_bird <- ggplot2::ggplot(data = bto_sc, ggplot2::aes(x = SC)) +
+  rphylopic::add_phylopic(img = bird_icon, x = 0.18, y = 3400, ysize = 300) +
+  ggplot2::geom_histogram(binwidth = 0.1, boundary = 0) +
+  ggplot2::labs(x = "Sample coverage", y = "Number of grid cells") +
+  ggplot2::theme(strip.background = element_blank(),
+                 plot.background = element_rect(fill = "white", colour = "white"))
+
+sc_hist <- cowplot::plot_grid(sc_hist_plant, sc_hist_butter, sc_hist_bird, ncol = 3)
+
+cowplot::save_plot("outputs/sc_hist.png", sc_hist, base_height = 6, base_width = 12)
+
+```
+
+# Supplementary - Site locations
+
+```{r}
+
+# basemap
+base_df <- as.data.frame(covars, xy = TRUE) %>% 
+  # drop cells with missing env data
+  dplyr::filter(!is.na(tri)) %>% 
+  # just cells with environmental data
+  dplyr::mutate(z = 1) %>% 
+  dplyr::select(x, y, z)
+
+# plants
+npms <- readRDS("data/plants/out_data/npms.rds")
+
+npms_sites <- npms %>% 
+  # unique sites
+  dplyr::distinct(cell, x, y, cell_id) %>% 
+  dplyr::mutate(tax = "Plants")
+
+nrow(npms_sites)
+# 253
+
+# butterflies
+bms <- readRDS("data/butterflies/out_data/bms.rds")
+
+bms_sites <- bms %>% 
+  # unique sites
+  dplyr::distinct(x_cell, y_cell, cell, cell_id) %>% 
+  dplyr::rename(x = x_cell, y = y_cell) %>% 
+  dplyr::mutate(tax = "Butterflies")
+
+nrow(bms_sites)
+# 926
+
+# birds
+bto <- readRDS("data/birds/out_data/bto.rds")
+
+bto_sites <- bto %>% 
+  # unique sites
+  dplyr::distinct(cell, x, y, cell_id) %>% 
+  dplyr::mutate(tax = "Birds")
+
+nrow(bto_sites)
+# 4442
+
+# combine sites
+sites_df <- dplyr::bind_rows(npms_sites, bto_sites, bms_sites)
+
+# create basemap for each taxonomic group
+base_df_rep <- dplyr::bind_rows(dplyr::mutate(base_df, tax = "Plants"), dplyr::mutate(base_df, tax = "Butterflies"), dplyr::mutate(base_df, tax = "Birds"))
+
+# combine basemaps and sites
+sites_base <- dplyr::left_join(base_df_rep, sites_df, by = c("x", "y", "tax")) %>% 
+  # included sites
+  dplyr::mutate(cell_yes = as.factor(ifelse(!is.na(cell), 1, 0)))
+
+site_map_plants <- ggplot2::ggplot(sites_base, ggplot2::aes(x = x, y = y)) +
+  # basemap
+  ggplot2::geom_raster(fill = "lightgrey") +
+  # add icon
+  # HERE
+  rphylopic::add_phylopic(img = plant_icon, x = , y = , ysize = ) +
+  # add sites
+  ggplot2::geom_point(data = dplyr::filter(sites_base, cell_yes == 1 & tax == "Plants"), colour = "black", size = 1e-100) +
+  # equal coordinates
+  ggplot2::coord_equal() +
+  # theme adjustments
+  ggplot2::theme_void() +
+  ggplot2::theme(legend.position = "none")
+
+# points
+sites_maps <- ggplot2::ggplot(sites_base, ggplot2::aes(x = x, y = y)) +
+  # basemap
+  ggplot2::geom_raster(fill = "lightgrey") +
+  # add sites
+  ggplot2::geom_point(data = dplyr::filter(sites_base, cell_yes == 1), colour = "black", size = 1e-100) +
+  # facet for taxonomic groups
+  ggplot2::facet_wrap(~ tax, ncol = 3) +
+  # equal coordinates
+  ggplot2::coord_equal() +
+  # theme adjustments
+  ggplot2::theme_void() +
+  ggplot2::theme(strip.background = element_blank(),
+                 legend.position = "none",
+                 plot.background = element_rect(fill = "white", colour = "white"))
+
+cowplot::save_plot("outputs/sites_maps.png", sites_maps, base_height = 4, base_width = 6)
+
+```
+
+# Supplementary - Model fit
+
+```{r}
+
+model_fit <- function(tax) {
+  
+  # load model
+  gdmr <- readRDS(paste0("data/", tax, "/out_data/", tax, "_gdmr.rds"))
+  
+  gd_eco <- data.frame(eco_dist = gdmr$ecological, obs_diss = gdmr$observed, pred_diss = gdmr$predicted) 
+  
+  gd_eco_line_x <- seq(from = min(gdmr$ecological), to = max(gdmr$ecological), length = 200)
+  
+  gd_eco_line_y <- 1 - exp(-gd_eco_line_x)
+  
+  gd_eco_line <- data.frame(line_x = gd_eco_line_x, line_y = gd_eco_line_y)
+  
+  eco_diss_plot <- ggplot2::ggplot(data = gd_eco, ggplot2::aes(x = eco_dist, y = obs_diss)) +
+    ggplot2::geom_point(alpha = 0.1, colour = "#779fc8", shape = 1, size = 0.5) +
+    ggplot2::geom_line(data = gd_eco_line, aes(x = line_x, y = line_y), colour = "#4477AA") +
+    ggplot2::labs(x = "Predicted ecological distance", y = "Observed dissimilarity") +
+    ggplot2::scale_x_continuous(expand = c(0,0)) +
+    ggplot2::scale_y_continuous(expand = c(0,0))
+  
+  pred_diss_plot <- ggplot2::ggplot(data = gd_eco, ggplot2::aes(x = pred_diss, y = obs_diss)) +
+    ggplot2::geom_point(alpha = 0.1, colour = "#779fc8", shape = 1, size = 0.5) +
+    ggplot2::geom_abline(intercept = 0, slope = 1, colour = "#4477AA") +
+    ggplot2::labs(x = "Predicted dissimilarity", y = "") +
+    ggplot2::scale_x_continuous(expand = c(0,0), limits = c(min(gd_eco$pred_diss), max(gd_eco$pred_diss))) +
+    ggplot2::scale_y_continuous(expand = c(0,0), limits = c(min(gd_eco$obs_diss), max(gd_eco$obs_diss)))
+  
+  # title
+  title <- cowplot::ggdraw() + 
+    cowplot::draw_label(firstup(tax), x = 0.5)
+  
+  gd_fit <- cowplot::plot_grid(title, cowplot::plot_grid(eco_diss_plot, pred_diss_plot, ncol = 2), ncol = 1, rel_heights = c(0.1, 1))
+  
+}
+
+gd_fit_out <- lapply(c("plants", "butterflies", "birds"), function(tax) model_fit(tax = tax))
+
+gd_fit_all <- cowplot::plot_grid(plotlist = gd_fit_out, ncol = 2) +
+  ggplot2::theme(plot.background = element_rect(fill = "white", colour = "white"))
+
+# save: gd_fit_all
+cowplot::save_plot("outputs/gd_fit_all.png", gd_fit_all, base_height = 10, base_width = 15, dpi = 300)
+
+```
+
+# Supplementary - Reference cells
+
+```{r}
+
+# reference cells as comparison - 20% of cells
+ref_cells <- readRDS("data/ref_cells.rds") %>% 
+  dplyr::mutate(ref = 1)
+
+# basemap
+base_df <- as.data.frame(covars, xy = TRUE) %>% 
+  # drop cells with missing env data
+  dplyr::filter(!is.na(tri)) %>% 
+  # just cells with environmental data
+  dplyr::mutate(z = 1) %>% 
+  dplyr::select(x, y, z)
+
+# combine basemaps and sites
+ref_base <- dplyr::left_join(base_df, ref_cells, by = c("x", "y"))
+
+ref_map <- ggplot2::ggplot(ref_base, ggplot2::aes(x = x, y = y)) +
+  # basemap
+  ggplot2::geom_raster(fill = "lightgrey") +
+  # add reference cells
+  #ggplot2::geom_point(data = dplyr::filter(ref_base, ref == 1), colour = "black", size = 0.000000001) +
+  ggplot2::geom_raster(data = dplyr::filter(ref_base, ref == 1), fill = "black") +
+  # equal coordinates
+  ggplot2::coord_equal() +
+  # theme adjustments
+  ggplot2::theme_void() +
+  ggplot2::theme(plot.background = ggplot2::element_rect(fill = "white", colour = "white"))
+
+cowplot::save_plot("outputs/ref_map.png", ref_map, base_height = 3.5, base_width = 2)
+
+```
+
+
+# Supplementary - Biological change
+
+```{r}
+
+# select taxonomic group
+tax <- "plants"
+
+# gdm
+if(tax == "plants") gdmr_tax <- gdmr_plants
+if(tax == "butterflies") gdmr_tax <- gdmr_butterflies
+if(tax == "birds") gdmr_tax <- gdmr_birds
+
+# function to map biological change due to climate change
+cc_map <- function(gdmr_tax, covars_rcp, title, lims, leg = FALSE) {
+  
+  # predict
+  timep <- predict(object = gdmr_tax, data = raster::stack(covars), time = TRUE, predRasts = covars_rcp)
+  names(timep) <- "change_orig"
+  
+  # convert to dataframe
+  timep_df <- as.data.frame(timep, xy = TRUE) %>% 
+    # remove intercept
+    dplyr::mutate(change = remove_int(gdmr_tax, change_orig)) %>% 
+    # convert change to percentage
+    dplyr::mutate(change = change * 100)
+  
+  # map
+  cc_out <- ggplot2::ggplot(dplyr::filter(timep_df, !is.na(change)), aes(x = x, y = y, fill = change)) +
+    ggplot2::geom_raster() +
+    # add median
+    ggplot2::geom_text(x = 500000, y = 700000, label = round(median(timep_df$change, na.rm = TRUE), digits = 0)) +
+    ggplot2::coord_equal() +
+    ggplot2::theme_void() +
+    ggplot2::labs(title = title, fill = "Biological\nchange (%)") +
+    ggplot2::scale_fill_gradientn(colours = c("#ECF1EC", "#D3DED6", "#BACCC3", "#A2B9B2", "#8AA6A4", "#738D92", "#5B717E", "#44546A", "#302E4C", "#24192C", "#0B060B"), limits = lims) +
+    ggplot2::theme(plot.title = ggplot2::element_text(hjust = 0.5, face = "bold"),
+                   plot.background = element_rect(fill = "white", colour = "white"))
+  
+  if(leg == FALSE) cc_out <- cc_out +
+    ggplot2::theme(legend.position = "none")
+  
+  return(cc_out)
+  
+}
+
+# min(ccmap_rcp26_2030$data$change)
+# max(ccmap_rcp85_2070$data$change)
+# plants = 0.0142295, 62.68589
+# butterflies = 0.2484449, 56.73511 
+# birds = 1.133248, 95.16292
+
+lims <- c(0.014, 95.163)
+
+# RCP 2.6 2030
+ccmap_rcp26_2030 <- cc_map(gdmr_tax = gdmr_tax, covars = raster::stack(covars_rcp26_2030), title = "RCP2.6\n2030", lims = lims)
+
+# RCP 2.6 2050
+ccmap_rcp26_2050 <- cc_map(gdmr_tax = gdmr_tax, covars = raster::stack(covars_rcp26_2050), title = "RCP2.6\n2050", lims = lims)
+
+# RCP 2.6 2070
+ccmap_rcp26_2070 <- cc_map(gdmr_tax = gdmr_tax, covars = raster::stack(covars_rcp26_2070), title = "RCP2.6\n2070", lims = lims)
+
+# RCP 4.5 2030
+ccmap_rcp45_2030 <- cc_map(gdmr_tax = gdmr_tax, covars = raster::stack(covars_rcp45_2030), title = "RCP4.5\n2030", lims = lims)
+
+# RCP 4.5 2050
+ccmap_rcp45_2050 <- cc_map(gdmr_tax = gdmr_tax, covars = raster::stack(covars_rcp45_2050), title = "RCP4.5\n2050", lims = lims)
+
+# RCP 4.5 2070
+ccmap_rcp45_2070 <- cc_map(gdmr_tax = gdmr_tax, covars = raster::stack(covars_rcp45_2070), title = "RCP4.5\n2070", lims = lims)
+
+# RCP 6.0 2030
+ccmap_rcp60_2030 <- cc_map(gdmr_tax = gdmr_tax, covars = raster::stack(covars_rcp60_2030), title = "RCP6.0\n2030", lims = lims)
+
+# RCP 6.0 2050
+ccmap_rcp60_2050 <- cc_map(gdmr_tax = gdmr_tax, covars = raster::stack(covars_rcp60_2050), title = "RCP6.0\n2050", lims = lims)
+
+# RCP 6.0 2070
+ccmap_rcp60_2070 <- cc_map(gdmr_tax = gdmr_tax, covars = raster::stack(covars_rcp60_2070), title = "RCP6.0\n2070", lims = lims)
+
+# RCP 8.5 2030
+ccmap_rcp85_2030 <- cc_map(gdmr_tax = gdmr_tax, covars = raster::stack(covars_rcp85_2030), title = "RCP8.5\n2030", lims = lims)
+
+# RCP 8.5 2050
+ccmap_rcp85_2050 <- cc_map(gdmr_tax = gdmr_tax, covars = raster::stack(covars_rcp85_2050), title = "RCP8.5\n2050", lims = lims)
+
+# RCP 8.5 2070
+ccmap_rcp85_2070 <- cc_map(gdmr_tax = gdmr_tax, covars = raster::stack(covars_rcp85_2070), title = "RCP8.5\n2070", lims = lims)
+
+# combine plots
+cc_maps_comb1 <- cowplot::plot_grid(ccmap_rcp26_2030, ccmap_rcp26_2050, ccmap_rcp26_2070, ccmap_rcp45_2030, ccmap_rcp45_2050, ccmap_rcp45_2070, ccmap_rcp60_2030, ccmap_rcp60_2050, ccmap_rcp60_2070, ccmap_rcp85_2030, ccmap_rcp85_2050, ccmap_rcp85_2070, ncol = 3)
+
+# legend across plots
+cc_leg <- cowplot::get_legend(cc_map(gdmr_tax = gdmr_tax, covars = raster::stack(covars_rcp85_2070), title = "RCP8.5\n2070", lims = lims, leg = TRUE))
+
+# icon plot
+if(tax == "plants") p_icon <- p_plant
+if(tax == "butterflies") p_icon <- p_butter
+if(tax == "birds") p_icon <- p_bird
+
+# legend with icon
+cc_leg_icon <- cowplot::plot_grid(cowplot::plot_grid(NULL, p_icon, NULL, ncol = 3, rel_widths = c(0.2, 1, 0.2)), cc_leg, nrow = 2)
+
+cc_maps_comb <- cowplot::plot_grid(cc_maps_comb1, cowplot::plot_grid(NULL, cc_leg_icon, NULL, nrow = 3), rel_widths = c(3, 0.7), rel_heights = c(1, 1)) +
+  ggplot2::theme(plot.background = element_rect(fill = "white", colour = "white"))
+
+# save
+cowplot::save_plot(paste0("outputs/", tax, "/", tax, "_biochange_maps_comb.png"), cc_maps_comb, base_height = 10, base_width = 6, dpi = 300)
+
+## Stats
+
+# median change RCP2.6
+median(ccmap_rcp26_2070$data$change, na.rm = TRUE)
+
+# median change RCP8.5
+median(ccmap_rcp85_2070$data$change, na.rm = TRUE)
+
+# Similarity across taxonomic groups
+
+# 8.5
+tax <- "plants"
+ccmap_plants <- cc_map(gdmr_tax = gdmr_plants, covars = raster::stack(covars_rcp85_2070), title = "RCP8.5\n2060-2080", lims = lims)
+
+tax <- "butterflies"
+ccmap_butter <- cc_map(gdmr_tax = gdmr_butterflies, covars = raster::stack(covars_rcp85_2070), title = "RCP8.5\n2060-2080", lims = lims)
+
+tax <- "birds"
+ccmap_birds <- cc_map(gdmr_tax = gdmr_birds, covars = raster::stack(covars_rcp85_2070), title = "RCP8.5\n2060-2080", lims = lims)
+
+cor_pl_bu <- cor(ccmap_plants$data$change, ccmap_butter$data$change, method = "spearman")
+
+cor_pl_bi <- cor(ccmap_plants$data$change, ccmap_birds$data$change, method = "spearman")
+
+cor_bu_bi <- cor(ccmap_butter$data$change, ccmap_birds$data$change, method = "spearman")
+
+# 2.6
+tax <- "plants"
+ccmap_plants <- cc_map(gdmr_tax = gdmr_plants, covars = raster::stack(covars_rcp26_2070), title = "RCP2.6\n2060-2080", lims = lims)
+
+tax <- "butterflies"
+ccmap_butter <- cc_map(gdmr_tax = gdmr_butterflies, covars = raster::stack(covars_rcp26_2070), title = "RCP2.6\n2060-2080", lims = lims)
+
+tax <- "birds"
+ccmap_birds <- cc_map(gdmr_tax = gdmr_birds, covars = raster::stack(covars_rcp26_2070), title = "RCP2.6\n2060-2080", lims = lims)
+
+cor_pl_bu <- cor(ccmap_plants$data$change, ccmap_butter$data$change, method = "spearman")
+
+cor_pl_bi <- cor(ccmap_plants$data$change, ccmap_birds$data$change, method = "spearman")
+
+cor_bu_bi <- cor(ccmap_butter$data$change, ccmap_birds$data$change, method = "spearman")
+
+```
+
+# Supplementary - Disappearing and novel environments across taxa all combinations
+
+## Supplementary - Disappearing
+
+```{r}
+
+# select taxonomic group
+tax <- "birds"
+
+# function to create disappearing maps
+disappear_map_out <- function(scenario_name, metric, title, lims, tax, leg = FALSE) {
+  
+  # convert to symbol so that it works with ggplot
+  metric <- sym(metric)
+  
+  # load dataframe of disappearing values
+  disappear_df <- readRDS(paste0("data/", tax, "/out_data/disappear/", tax, "_disappear_", scenario_name, ".rds")) %>% 
+    # convert to percentages
+    dplyr::mutate(dplyr::across(c(disappearing_min, disappearing_mean, disappearing_median), ~. * 100))
+  
+  # map
+  d_map <- ggplot2::ggplot(disappear_df, ggplot2::aes(x = x, y = y, fill = !!metric)) +
+    ggplot2::geom_raster() +
+    ggplot2::coord_equal() +
+    ggplot2::labs(title = title, fill = "Disappearing\nbioclimates (%)") +
+    # colours
+    ggplot2::scale_fill_gradientn(colours = c("#EDF0F8", "#C2B9E3", "#B688C9", "#AD5B9C", "#984D99", "#754084", "#55346F", "#392859", "#211C42", "#12142B", "#080B13"), limits = lims) +
+    # theme
+    ggplot2::theme_void() +
+    {if(leg == FALSE) ggplot2::theme(legend.position = "none", plot.margin = unit(c(0, 0, 0, 0), "cm"))} +
+    ggplot2::theme(plot.title = ggplot2::element_text(hjust = 0.5, face = "bold"))
+  
+  return(d_map)
+  
+}
+
+lims <- c(0.005, 90.9)
+# see below
+
+# RCP 2.6 2030
+dmap_rcp26_2030 <- disappear_map_out(scenario_name = "rcp26_2030", metric = "disappearing_min", title = "RCP2.6\n2030", tax = tax, lims = lims)
+
+# RCP 2.6 2050
+dmap_rcp26_2050 <- disappear_map_out(scenario_name = "rcp26_2050", metric = "disappearing_min", title = "RCP2.6\n2050", tax = tax, lims = lims)
+
+# RCP 2.6 2070
+dmap_rcp26_2070 <- disappear_map_out(scenario_name = "rcp26_2070", metric = "disappearing_min", title = "RCP2.6\n2070", tax = tax, lims = lims)
+
+# RCP 4.5 2030
+dmap_rcp45_2030 <- disappear_map_out(scenario_name = "rcp45_2030", metric = "disappearing_min", title = "RCP4.5\n2030", tax = tax, lims = lims)
+
+# RCP 4.5 2050
+dmap_rcp45_2050 <- disappear_map_out(scenario_name = "rcp45_2050", metric = "disappearing_min", title = "RCP4.5\n2050", tax = tax, lims = lims)
+
+# RCP 4.5 2070
+dmap_rcp45_2070 <- disappear_map_out(scenario_name = "rcp45_2070", metric = "disappearing_min", title = "RCP4.5\n2070", tax = tax, lims = lims)
+
+# RCP 6.0 2030
+dmap_rcp60_2030 <- disappear_map_out(scenario_name = "rcp60_2030", metric = "disappearing_min", title = "RCP6.0\n2030", tax = tax, lims = lims)
+
+# RCP 6.0 2050
+dmap_rcp60_2050 <- disappear_map_out(scenario_name = "rcp60_2050", metric = "disappearing_min", title = "RCP6.0\n2050", tax = tax, lims = lims)
+
+# RCP 6.0 2070
+dmap_rcp60_2070 <- disappear_map_out(scenario_name = "rcp60_2070", metric = "disappearing_min", title = "RCP6.0\n2070", tax = tax, lims = lims)
+
+# RCP 8.5 2030
+dmap_rcp85_2030 <- disappear_map_out(scenario_name = "rcp85_2030", metric = "disappearing_min", title = "RCP8.5\n2030", tax = tax, lims = lims)
+
+# RCP 8.5 2050
+dmap_rcp85_2050 <- disappear_map_out(scenario_name = "rcp85_2050", metric = "disappearing_min", title = "RCP8.5\n2050", tax = tax, lims = lims)
+
+# RCP 8.5 2070
+dmap_rcp85_2070 <- disappear_map_out(scenario_name = "rcp85_2070", metric = "disappearing_min", title = "RCP8.5\n2070", tax = tax, lims = lims)
+
+# combine plots
+d_maps_comb1 <- cowplot::plot_grid(dmap_rcp26_2030, dmap_rcp26_2050, dmap_rcp26_2070, dmap_rcp45_2030, dmap_rcp45_2050, dmap_rcp45_2070, dmap_rcp60_2030, dmap_rcp60_2050, dmap_rcp60_2070, dmap_rcp85_2030, dmap_rcp85_2050, dmap_rcp85_2070, ncol = 3)
+
+# legend across plots
+d_leg <- cowplot::get_legend(disappear_map_out(scenario_name = "rcp26_2070", metric = "disappearing_min", title = "RCP2.6\n2070", tax = tax, lims = lims, leg = TRUE))
+
+# icon plot
+if(tax == "plants") p_icon <- p_plant
+if(tax == "butterflies") p_icon <- p_butter
+if(tax == "birds") p_icon <- p_bird
+
+# legend with icon
+d_leg_icon <- cowplot::plot_grid(cowplot::plot_grid(NULL, p_icon, NULL, ncol = 3, rel_widths = c(0.2, 1, 0.2)), d_leg, nrow = 2)
+
+# combine all elements
+d_maps_comb <- cowplot::plot_grid(d_maps_comb1, cowplot::plot_grid(NULL, d_leg_icon, NULL, nrow = 3), rel_widths = c(3, 0.7), rel_heights = c(1, 1)) +
+  ggplot2::theme(plot.background = element_rect(fill = "white", colour = "white"))
+
+# save
+cowplot::save_plot(paste0("outputs/", tax, "/", tax, "_d_maps_comb.png"), d_maps_comb, base_height = 10, base_width = 6.2, dpi = 300)
+
+# # limits
+# min_lim <- min(c(min(dmap_rcp26_2030$data$disappearing_min), min(dmap_rcp26_2050$data$disappearing_min), min(dmap_rcp26_2070$data$disappearing_min), min(dmap_rcp45_2030$data$disappearing_min), min(dmap_rcp45_2050$data$disappearing_min), min(dmap_rcp45_2070$data$disappearing_min), min(dmap_rcp60_2030$data$disappearing_min), min(dmap_rcp60_2050$data$disappearing_min), min(dmap_rcp60_2070$data$disappearing_min), min(dmap_rcp85_2030$data$disappearing_min), min(dmap_rcp85_2050$data$disappearing_min), min(dmap_rcp85_2070$data$disappearing_min)))
+# 
+# max_lim <- max(c(max(dmap_rcp26_2030$data$disappearing_min), max(dmap_rcp26_2050$data$disappearing_min), max(dmap_rcp26_2070$data$disappearing_min), max(dmap_rcp45_2030$data$disappearing_min), max(dmap_rcp45_2050$data$disappearing_min), max(dmap_rcp45_2070$data$disappearing_min), max(dmap_rcp60_2030$data$disappearing_min), max(dmap_rcp60_2050$data$disappearing_min), max(dmap_rcp60_2070$data$disappearing_min), max(dmap_rcp85_2030$data$disappearing_min), max(dmap_rcp85_2050$data$disappearing_min), max(dmap_rcp85_2070$data$disappearing_min)))
+# 
+# # plants = 0.0142295, 45.59574
+# # butterflies = 0.005327462, 48.84153
+# # birds = 0.06829145, 90.85438
+
+## correlations
+
+l_dmap <- list("rcp26_2030" = dmap_rcp26_2030$data$disappearing_min, "rcp26_2050" = dmap_rcp26_2050$data$disappearing_min, "rcp26_2070" = dmap_rcp26_2070$data$disappearing_min, "rcp45_2030" = dmap_rcp45_2030$data$disappearing_min, "rcp45_2050" =  dmap_rcp45_2050$data$disappearing_min, "rcp45_2070" =  dmap_rcp45_2070$data$disappearing_min, "rcp60_2030" =  dmap_rcp60_2030$data$disappearing_min, "rcp60_2050" =  dmap_rcp60_2050$data$disappearing_min, "rcp60_2070" =  dmap_rcp60_2070$data$disappearing_min, "rcp85_2030" =  dmap_rcp85_2030$data$disappearing_min, "rcp85_2050" =  dmap_rcp85_2050$data$disappearing_min, "rcp85_2070" =  dmap_rcp85_2070$data$disappearing_min)
+
+l_dmap_cor <- sapply(names(l_dmap), function(x) {
+  sapply(names(l_dmap), function(y) {
+    cor(l_dmap[[x]], l_dmap[[y]], method = "spearman")
+  })
+}) %>% 
+  as.data.frame(.)
+
+# minimum correlation
+min(l_dmap_cor)
+
+# butterflies birds
+butter_dmap_rcp85_2070 <- disappear_map_out(scenario_name = "rcp85_2070", metric = "disappearing_min", title = "RCP8.5\n2070", tax = "butterflies", lims = lims)
+birds_dmap_rcp85_2070 <- disappear_map_out(scenario_name = "rcp85_2070", metric = "disappearing_min", title = "RCP8.5\n2070", tax = "birds", lims = lims)
+
+cor(butter_dmap_rcp85_2070$data$disappearing_min, birds_dmap_rcp85_2070$data$disappearing_min, method = "spearman")
+
+```
+
+## Supplementary - Novel
+
+```{r}
+
+# select taxonomic group
+tax <- "birds"
+
+# function to create novel maps (needed for Supp as well)
+novel_map_out <- function(scenario_name, metric, med = FALSE, title, lims, tax, leg = FALSE) {
+  
+  # convert to symbol so that it works with ggplot
+  metric <- sym(metric)
+  
+  # load dataframe of novel values
+  novel_df <- readRDS(paste0("data/", tax, "/out_data/novel/", tax, "_novel_", scenario_name, ".rds")) %>% 
+    # convert to percentages
+    dplyr::mutate(dplyr::across(c(novel_min, novel_mean, novel_median), ~. * 100))
+  
+  # map
+  n_map <- ggplot2::ggplot(novel_df, ggplot2::aes(x = x, y = y, fill = !!metric)) +
+    ggplot2::geom_raster() +
+    ggplot2::coord_equal() +
+    ggplot2::labs(title = title, fill = "Novel\nbioclimates (%)") +
+    # colours
+    ggplot2::scale_fill_gradientn(colours = c("#ECFAF7", "#B5E7E2", "#81D1CC", "#52B6B6", "#45A19B", "#398B80", "#2D7566", "#225E4D", "#184636", "#0F2E20", "#06140D"), limits = lims) +
+    # theme
+    ggplot2::theme_void() +
+    {if(leg == FALSE) ggplot2::theme(legend.position = "none", plot.margin = unit(c(0, 0, 0, 0), "cm"))} +
+    ggplot2::theme(plot.title = ggplot2::element_text(hjust = 0.5, face = "bold"))
+  
+  return(n_map)
+  
+}
+
+# lims <- c(NA, NA)
+lims <- c(0.005, 52.64)
+# see below
+
+# RCP 2.6 2020-2040
+nmap_rcp26_2030 <- novel_map_out(scenario_name = "rcp26_2030", metric = "novel_min", title = "RCP2.6\n2020-2040", tax = tax, lims = lims)
+
+# RCP 2.6 2040-2060
+nmap_rcp26_2050 <- novel_map_out(scenario_name = "rcp26_2050", metric = "novel_min", title = "RCP2.6\n2040-2060", tax = tax, lims = lims)
+
+# RCP 2.6 2060-2080
+nmap_rcp26_2070 <- novel_map_out(scenario_name = "rcp26_2070", metric = "novel_min", title = "RCP2.6\n2060-2080", tax = tax, lims = lims)
+
+# RCP 4.5 2020-2040
+nmap_rcp45_2030 <- novel_map_out(scenario_name = "rcp45_2030", metric = "novel_min", title = "RCP4.5\n2020-2040", tax = tax, lims = lims)
+
+# RCP 4.5 2040-2060
+nmap_rcp45_2050 <- novel_map_out(scenario_name = "rcp45_2050", metric = "novel_min", title = "RCP4.5\n2040-2060", tax = tax, lims = lims)
+
+# RCP 4.5 2060-2080
+nmap_rcp45_2070 <- novel_map_out(scenario_name = "rcp45_2070", metric = "novel_min", title = "RCP4.5\n2060-2080", tax = tax, lims = lims)
+
+# RCP 6.0 2020-2040
+nmap_rcp60_2030 <- novel_map_out(scenario_name = "rcp60_2030", metric = "novel_min", title = "RCP6.0\n2020-2040", tax = tax, lims = lims)
+
+# RCP 6.0 2040-2060
+nmap_rcp60_2050 <- novel_map_out(scenario_name = "rcp60_2050", metric = "novel_min", title = "RCP6.0\n2040-2060", tax = tax, lims = lims)
+
+# RCP 6.0 2060-2080
+nmap_rcp60_2070 <- novel_map_out(scenario_name = "rcp60_2070", metric = "novel_min", title = "RCP6.0\n2060-2080", tax = tax, lims = lims)
+
+# RCP 8.5 2020-2040
+nmap_rcp85_2030 <- novel_map_out(scenario_name = "rcp85_2030", metric = "novel_min", title = "RCP8.5\n2020-2040", tax = tax, lims = lims)
+
+# RCP 8.5 2040-2060
+nmap_rcp85_2050 <- novel_map_out(scenario_name = "rcp85_2050", metric = "novel_min", title = "RCP8.5\n2040-2060", tax = tax, lims = lims)
+
+# RCP 8.5 2060-2080
+nmap_rcp85_2070 <- novel_map_out(scenario_name = "rcp85_2070", metric = "novel_min", title = "RCP8.5\n2060-2080", tax = tax, lims = lims)
+
+# combine plots
+n_maps_comb1 <- cowplot::plot_grid(nmap_rcp26_2030, nmap_rcp26_2050, nmap_rcp26_2070, nmap_rcp45_2030, nmap_rcp45_2050, nmap_rcp45_2070, nmap_rcp60_2030, nmap_rcp60_2050, nmap_rcp60_2070, nmap_rcp85_2030, nmap_rcp85_2050, nmap_rcp85_2070, ncol = 3)
+
+# legend across plots
+n_leg <- cowplot::get_legend(novel_map_out(scenario_name = "rcp26_2070", metric = "novel_min", title = "RCP2.6\n2060-2080", tax = tax, lims = lims, leg = TRUE))
+
+# icon plot
+if(tax == "plants") p_icon <- p_plant
+if(tax == "butterflies") p_icon <- p_butter
+if(tax == "birds") p_icon <- p_bird
+
+# legend with icon
+n_leg_icon <- cowplot::plot_grid(cowplot::plot_grid(NULL, p_icon, NULL, ncol = 3, rel_widths = c(0.2, 1, 0.2)), n_leg, nrow = 2)
+
+n_maps_comb <- cowplot::plot_grid(n_maps_comb1, cowplot::plot_grid(NULL, n_leg_icon, NULL, nrow = 3), rel_widths = c(3, 0.7), rel_heights = c(1, 1)) +
+  ggplot2::theme(plot.background = element_rect(fill = "white", colour = "white"))
+
+# save
+cowplot::save_plot(paste0("outputs/", tax, "/", tax, "_n_maps_comb.png"), n_maps_comb, base_height = 10, base_width = 6.2, dpi = 300)
+
+# # limits
+# min_lim <- min(c(min(nmap_rcp26_2030$data$novel_min), min(nmap_rcp26_2050$data$novel_min), min(nmap_rcp26_2070$data$novel_min), min(nmap_rcp45_2030$data$novel_min), min(nmap_rcp45_2050$data$novel_min), min(nmap_rcp45_2070$data$novel_min), min(nmap_rcp60_2030$data$novel_min), min(nmap_rcp60_2050$data$novel_min), min(nmap_rcp60_2070$data$novel_min), min(nmap_rcp85_2030$data$novel_min), min(nmap_rcp85_2050$data$novel_min), min(nmap_rcp85_2070$data$novel_min)))
+# 
+# max_lim <- max(c(max(nmap_rcp26_2030$data$novel_min), max(nmap_rcp26_2050$data$novel_min), max(nmap_rcp26_2070$data$novel_min), max(nmap_rcp45_2030$data$novel_min), max(nmap_rcp45_2050$data$novel_min), max(nmap_rcp45_2070$data$novel_min), max(nmap_rcp60_2030$data$novel_min), max(nmap_rcp60_2050$data$novel_min), max(nmap_rcp60_2070$data$novel_min), max(nmap_rcp85_2030$data$novel_min), max(nmap_rcp85_2050$data$novel_min), max(nmap_rcp85_2070$data$novel_min)))
+# 
+# # plants = 0.0142295, 52.636
+# # butterflies = 0.005327462, 27.6275
+# # birds = 0.06829145, 46.03835
+
+# correlations
+l_nmap <- list("rcp26_2030" = nmap_rcp26_2030$data$novel_min, "rcp26_2050" = nmap_rcp26_2050$data$novel_min, "rcp26_2070" = nmap_rcp26_2070$data$novel_min, "rcp45_2030" = nmap_rcp45_2030$data$novel_min, "rcp45_2050" =  nmap_rcp45_2050$data$novel_min, "rcp45_2070" =  nmap_rcp45_2070$data$novel_min, "rcp60_2030" =  nmap_rcp60_2030$data$novel_min, "rcp60_2050" =  nmap_rcp60_2050$data$novel_min, "rcp60_2070" =  nmap_rcp60_2070$data$novel_min, "rcp85_2030" =  nmap_rcp85_2030$data$novel_min, "rcp85_2050" =  nmap_rcp85_2050$data$novel_min, "rcp85_2070" =  nmap_rcp85_2070$data$novel_min)
+
+l_nmap_cor <- sapply(names(l_nmap), function(x) {
+  sapply(names(l_nmap), function(y) {
+    cor(l_nmap[[x]], l_nmap[[y]], method = "spearman")
+  })
+}) %>% 
+  as.data.frame(.)
+
+# minimum correlation
+min(l_nmap_cor)
+
+# maps
+plants_nmap_rcp85_2070 <- novel_map_out(scenario_name = "rcp85_2070", metric = "novel_min", title = "RCP8.5\n2060-2080", tax = "plants", lims = lims)
+butter_nmap_rcp85_2070 <- novel_map_out(scenario_name = "rcp85_2070", metric = "novel_min", title = "RCP8.5\n2060-2080", tax = "butterflies", lims = lims)
+birds_nmap_rcp85_2070 <- novel_map_out(scenario_name = "rcp85_2070", metric = "novel_min", title = "RCP8.5\n2060-2080", tax = "birds", lims = lims)
+
+# maps
+df <- birds_nmap_rcp85_2070$data
+n_map <- ggplot2::ggplot(dplyr::filter(df, novel_min >= quantile(df$novel_min, 0.95)), ggplot2::aes(x = x, y = y, fill = novel_min)) +
+    ggplot2::geom_raster() +
+    ggplot2::coord_equal() +
+    ggplot2::theme_void()
+
+cor(butter_nmap_rcp85_2070$data$novel_min, birds_nmap_rcp85_2070$data$novel_min, method = "spearman")
+
+```
+
+# Supplementary - Species heading for extinction
+
+```{r}
+
+# choose taxonomic group
+tax <- "plants"
+tax <- "butterflies"
+tax <- "birds"
+
+# function to map species heading for extinction under land-use change and climate change
+pers_map_supp <- function(scenario_name, tax, lims, yr = TRUE, med = FALSE, leg = FALSE) {
+  
+  # load data
+  pers_df <- readRDS(paste0("data/", tax, "/out_data/pers/", tax, "_", scenario_name, ".rds")) %>%   
+    # expected persistence using species-area relationship
+    # pitest in Di Marco et al., 2019 equation 3
+    dplyr::mutate(pers = (sim_hc / sim_pris) ^ z) %>% 
+    # extinction risk
+    dplyr::mutate(extinct = 1 - pers)
+  
+  geo_mean <- pers_df %>% 
+    # cell weight
+    # w in Di Marco et al., 2019 equation 6
+    dplyr::mutate(cell_weight = 1 / sim_pris) %>% 
+    # numerator see Mokany et al., 2022 Supporting Information Appendix S1 - section 2.10
+    dplyr::mutate(numerator = pers * cell_weight) %>% 
+    # numerator in geometric mean see Di Marco et al., 2019 equation 5
+    dplyr::mutate(numerator_ln = log(pers) * cell_weight)
+  
+  # regional estimate of species committed to extinction
+  ext_reg <- 100 * (1 - exp(sum(geo_mean$numerator_ln) / sum(geo_mean$cell_weight)))
+  
+  splt <- unlist(strsplit(scenario_name, "_"))
+  
+  # generate title for plot
+  if(splt[[1]] == "baseline") {
+    
+    title <- paste0(firstup(tax), "\n", firstup(splt[[1]]))
+    
+  } else {
+    
+    if(yr == FALSE) {
+      
+      title <- paste0("RCP", unlist(strsplit(gsub("\\D", "", splt[[1]]), ""))[[1]], ".", unlist(strsplit(gsub("\\D", "", splt[[1]]), ""))[[2]], "-SSP", gsub("\\D", "", splt[[2]]))
+      
+    } else {
+      
+      title <- paste0("RCP", unlist(strsplit(gsub("\\D", "", splt[[1]]), ""))[[1]], ".", unlist(strsplit(gsub("\\D", "", splt[[1]]), ""))[[2]], "-SSP", gsub("\\D", "", splt[[2]]), "\n", as.numeric(splt[[3]]) - 10, "-", as.numeric(splt[[3]]) + 10)
+      
+    }
+    
+  }
+  
+  pers_df$tempvar <- title
+  
+  # map
+  pers_out <- ggplot2::ggplot(pers_df, ggplot2::aes(x = x, y = y, fill = 100 * extinct)) +
+    ggplot2::geom_raster() +
+    ggplot2::coord_equal() +
+    ggplot2::labs(fill = "Percent\nof species\nheading\nfor extinction", title = title) +
+    scico::scale_fill_scico(palette = "bilbao", na.value = "grey", limits = lims, direction = -1) +
+    ggplot2::theme_void()
+  
+  # add median
+  if(med == TRUE) {
+    pers_out <- pers_out + ggplot2::geom_text(x = 500000, y = 700000, label = round(ext_reg, digits = 0))
+  }
+  
+  pers_out <- pers_out +
+      ggplot2::theme(plot.title = ggplot2::element_text(hjust = 0.5, face = "bold"))
+  
+  # legend
+  if(leg == FALSE) {
+    pers_out <- pers_out + ggplot2::theme(legend.position = "none")
+  }
+  
+  return(pers_out)
+  
+}
+
+# limits across plots
+lims <- c((100 * 0.036), (100 * 0.242))
+# # limits
+# pmaps <- lapply(sc_nms, function(scenario_name) pers_map(scenario_name = scenario_name, lims = lims, tax = tax, leg = FALSE))
+# min(sapply(1:length(pmaps), function(x) min(pmaps[[x]]$data$extinct)))
+# max(sapply(1:length(pmaps), function(x) max(pmaps[[x]]$data$extinct)))
+# # plants = 0.03735299, 0.2415008
+# # butterflies = 0.07160245, 0.159003
+# # birds = 0.03665586, 0.2239393
+
+# scenario names
+sc_nms <- c("rcp26_ssp1_2030", "rcp26_ssp1_2050", "rcp26_ssp1_2070", "rcp45_ssp2_2030", "rcp45_ssp2_2050", "rcp45_ssp2_2070", "rcp45_ssp4_2030", "rcp45_ssp4_2050", "rcp45_ssp4_2070", "rcp60_ssp3_2030", "rcp60_ssp3_2050", "rcp60_ssp3_2070", "rcp85_ssp2_2030", "rcp85_ssp2_2050", "rcp85_ssp2_2070", "rcp85_ssp5_2030", "rcp85_ssp5_2050", "rcp85_ssp5_2070")
+
+pmaps <- lapply(sc_nms, function(scenario_name) pers_map_supp(scenario_name = scenario_name, lims = lims, tax = tax, leg = FALSE, yr = TRUE, med = TRUE)) %>% 
+  cowplot::plot_grid(plotlist = ., ncol = 3)
+
+# legend across plots
+pmaps_leg <- cowplot::get_legend(pers_map(scenario_name = sc_nms[[1]], lims = lims, tax = tax, leg = TRUE))
+
+# icon plot
+if(tax == "plants") p_icon <- p_plant
+if(tax == "butterflies") p_icon <- p_butter
+if(tax == "birds") p_icon <- p_bird
+
+# legend with icon
+pmaps_leg_icon <- cowplot::plot_grid(cowplot::plot_grid(NULL, p_icon, NULL, ncol = 3, rel_widths = c(0.2, 1, 0.2)), pmaps_leg, nrow = 2)
+
+pmaps_comb <- cowplot::plot_grid(pmaps, cowplot::plot_grid(NULL, pmaps_leg_icon, NULL, nrow = 3), rel_widths = c(3, 0.7), rel_heights = c(1, 1)) +
+  ggplot2::theme(plot.background = element_rect(fill = "white", colour = "white"))
+
+# save pmaps_comb
+cowplot::save_plot(paste0("outputs/", tax, "/", tax, "_pmaps_comb.png"), pmaps_comb, base_height = 16, base_width = 6, dpi = 300)
+
+## correlations
+
+pmaps_cor <- lapply(sc_nms, function(scenario_name) pers_map(scenario_name = scenario_name, lims = lims, tax = tax, leg = FALSE, med = TRUE, yr = TRUE))
+
+cor(pmaps_cor[[3]]$data$extinct, pmaps_cor[[6]]$data$extinct, method = "spearman")
+cor(pmaps_cor[[3]]$data$extinct, pmaps_cor[[9]]$data$extinct, method = "spearman")
+cor(pmaps_cor[[3]]$data$extinct, pmaps_cor[[12]]$data$extinct, method = "spearman")
+cor(pmaps_cor[[3]]$data$extinct, pmaps_cor[[15]]$data$extinct, method = "spearman")
+cor(pmaps_cor[[3]]$data$extinct, pmaps_cor[[18]]$data$extinct, method = "spearman")
+cor(pmaps_cor[[6]]$data$extinct, pmaps_cor[[9]]$data$extinct, method = "spearman")
+cor(pmaps_cor[[6]]$data$extinct, pmaps_cor[[12]]$data$extinct, method = "spearman")
+cor(pmaps_cor[[6]]$data$extinct, pmaps_cor[[15]]$data$extinct, method = "spearman")
+cor(pmaps_cor[[6]]$data$extinct, pmaps_cor[[18]]$data$extinct, method = "spearman")
+cor(pmaps_cor[[9]]$data$extinct, pmaps_cor[[12]]$data$extinct, method = "spearman")
+cor(pmaps_cor[[9]]$data$extinct, pmaps_cor[[15]]$data$extinct, method = "spearman")
+cor(pmaps_cor[[9]]$data$extinct, pmaps_cor[[18]]$data$extinct, method = "spearman")
+cor(pmaps_cor[[12]]$data$extinct, pmaps_cor[[15]]$data$extinct, method = "spearman")
+cor(pmaps_cor[[12]]$data$extinct, pmaps_cor[[18]]$data$extinct, method = "spearman")
+cor(pmaps_cor[[15]]$data$extinct, pmaps_cor[[18]]$data$extinct, method = "spearman")
+# sc_nms[[3]]
+# plants min = 0.2473207 3 (RCP2.6-SSP1), 9 (RCP4.5-SSP4)
+# butterflies min = 0.7000784 3 (RCP2.6-SSP1), 9 (RCP4.5-SSP4)
+# birds min = 0.5528507 3 (RCP2.6-SSP1), 18 (RCP8.5-SSP5)
+
+# baseline across taxonomic groups
+
+base_plants <- pers_map(scenario_name = "baseline_2020", lims = lims, tax = "plants", med = TRUE)
+base_butterflies <- pers_map(scenario_name = "baseline_2020", lims = lims, tax = "butterflies", med = TRUE)
+base_birds <- pers_map(scenario_name = "baseline_2020", lims = lims, tax = "birds", med = TRUE)
+
+# legend across plots
+base_leg <- cowplot::get_legend(pers_map(scenario_name = "baseline_2020", lims = lims, tax = "plants", leg = TRUE))
+
+base_comb <- cowplot::plot_grid(base_plants, base_butterflies, base_birds, base_leg, nrow = 1, rel_widths = c(1, 1, 1, 0.4)) +
+  ggplot2::theme(plot.background = element_rect(fill = "white", colour = "white"))
+
+# save plot: baseline_comb
+cowplot::save_plot("outputs/baseline_comb.png", base_comb, base_height = 6, base_width = 12, dpi = 300)
+
+```
+
+# Supplementary - spline plots
+
+```{r}
+
+# select taxonomic group
+tax <- "birds"
+
+# load model tables
+gdmTab_plants <- readRDS(paste0("data/plants/out_data/plants_gdmTab.rds"))
+gdmTab_butterflies <- readRDS(paste0("data/butterflies/out_data/butterflies_gdmTab.rds"))
+gdmTab_birds <- readRDS(paste0("data/birds/out_data/birds_gdmTab.rds"))
+
+# gdm
+if(tax == "plants") gdmr_tax <- gdmr_plants
+if(tax == "butterflies") gdmr_tax <- gdmr_butterflies
+if(tax == "birds") gdmr_tax <- gdmr_birds
+
+# gdmTab
+if(tax == "plants") gdmTab_tax <- gdmTab_plants
+if(tax == "butterflies") gdmTab_tax <- gdmTab_butterflies
+if(tax == "birds") gdmTab_tax <- gdmTab_birds
+
+# icon plot
+if(tax == "plants") p_icon <- p_plant
+if(tax == "butterflies") p_icon <- p_butter
+if(tax == "birds") p_icon <- p_bird
+
+splines <- gdm::isplineExtract(gdmr_tax) %>% 
+  as.data.frame(.) %>% 
+  # convert distance from m to km
+  dplyr::mutate(x.Geographic = x.Geographic / 1000)
+
+# rugs
+
+# function to get rug data
+# adapted from plot.gdm function
+rug_func <- function(gdmr, gdmTab) {
+  
+  rugData <- vector(mode = "list", length = length(gdmr$predictors))
+  
+  rugData[[1]] <- unique(sqrt(((gdmTab$s1.xCoord - gdmTab$s2.xCoord) ^ 2) + ((gdmTab$s1.yCoord - gdmTab$s2.yCoord) ^ 2))) %>% 
+    as.data.frame() %>% 
+    setNames(gdmr$predictors[[1]]) %>% 
+    dplyr::mutate(Geographic = Geographic / 1000)
+  
+  rugData[2:length(gdmr$predictors)] <- lapply(2:length(gdmr$predictors), function(i) {
+    
+    varNam <- gdmr$predictors[i]
+
+    varDat <- grep(varNam, colnames(gdmTab))
+  
+    rugData_var <- unique(c(gdmTab[, c(varDat[1])], gdmTab[, c(varDat[2])])) %>% 
+      as.data.frame() %>% 
+      setNames(varNam)
+      
+    return(rugData_var)
+  
+  })
+  
+  return(rugData)
+  
+}
+
+rugs <- rug_func(gdmr = gdmr_tax, gdmTab = gdmTab_tax)
+
+names(rugs) <- sapply(1:length(rugs), function(x) colnames(rugs[[x]][1]))
+
+spline_plot <- function(df, rugs, var, xlab, max_y) {
+  
+  x <- paste0("x.", var)
+  y <- paste0("y.", var)
+  
+  max_val <- df %>% 
+    dplyr::select(!!as.name(x)) %>% 
+    max(.)
+  
+  min_val <- min(dplyr::select(df, !!as.name(x)))
+  
+  rug <- rugs[[var]]
+  
+  p <- ggplot2::ggplot(data = df, ggplot2::aes(x = !!as.name(x), y = !!as.name(y))) +
+    #ggplot2::geom_ribbon(ggplot2::aes(ymin = !!as.name(y) - !!as.name(y_sd), ymax = !!as.name(y) + !!as.name(y_sd), fill = type), alpha = 0.5) +
+    ggplot2::geom_line(lwd = 1) +
+    ggplot2::geom_rug(data = rug, ggplot2::aes(x = !!as.name(var)), sides = "b", inherit.aes = FALSE) +
+    ggplot2::coord_cartesian(y = c(0, max_y), x = c(min_val, max_val)) +
+    ggplot2::labs(x = xlab, y = "Cumulative\ncompositional dissimilarity") + 
+    ggplot2::theme(legend.position = "none")
+  
+  return(p)
+  
+}
+
+# maximum value on y-axis
+# approximate suitable value that can be tweaked
+# summary(gdmr_tax) - look at maximum sum of coefficients
+if(tax == "plants") max_y <- 0.879
+if(tax == "butterflies") max_y <- 0.737
+if(tax == "birds") max_y <- 2.288
+
+gdmr_tax$predictors
+
+Geographic_sp <- spline_plot(df = splines, rugs = rugs, var = "Geographic", xlab = "Geographic distance\n ", max_y = max_y)
+
+tri_sp <- spline_plot(df = splines, rugs = rugs, var = "tri", xlab = "Topographic ruggedness index\n ", max_y = max_y)
+
+twi_sp <- spline_plot(df = splines, rugs = rugs, var = "twi", xlab = "Topographic wetness index\n ", max_y = max_y)
+
+ph_sp <- spline_plot(df = splines, rugs = rugs, var = "ph", xlab = "Soil pH\n ", max_y = max_y)
+
+tmin_sp <- spline_plot(df = splines, rugs = rugs, var = "tmin", xlab = "Annual minimum temperature\n ", max_y = max_y)
+
+tmax_sp <- spline_plot(df = splines, rugs = rugs, var = "tmax", xlab = "Annual maximum temperature\n ", max_y = max_y)
+
+trngx_sp <- spline_plot(df = splines, rugs = rugs, var = "trngx", xlab = "Maximum monthly diurnal\ntemperature range", max_y = max_y)
+
+prec_sp <- spline_plot(df = splines, rugs = rugs, var = "prec", xlab = "Annual precipitation\n ", max_y = max_y)
+
+pseas_sp <- spline_plot(df = splines, rugs = rugs, var = "pseas", xlab = "Precipitation seasonality\n ", max_y = max_y)
+
+peti_sp <- spline_plot(df = splines, rugs = rugs, var = "peti", xlab = "Potential evapotranspiration with\ninterception correction of driest month", max_y = max_y)
+
+sun_sp <- spline_plot(df = splines, rugs = rugs, var = "sun", xlab = "Annual surface downwelling\nshortwave radiation", max_y = max_y)
+
+summary(gdmr_tax)
+
+# ordered based on maximum spline height
+# # plants
+# p_spline <- cowplot::plot_grid(tmax_sp, ph_sp + ggplot2::labs(y = ""), tmin_sp + ggplot2::labs(y = ""), prec_sp, Geographic_sp + ggplot2::labs(y = ""), peti_sp + ggplot2::labs(y = ""), pseas_sp, tri_sp + ggplot2::labs(y = ""), twi_sp + ggplot2::labs(y = ""), sun_sp, trngx_sp + ggplot2::labs(y = ""), cowplot::plot_grid(NULL, p_icon, NULL, nrow = 3, rel_heights = c(1.5, 1, 1.5)), ncol = 3) +
+#   ggplot2::theme(plot.background = element_rect(fill = "white", colour = "white"))
+# # butterflies
+# p_spline <- cowplot::plot_grid(sun_sp, Geographic_sp + ggplot2::labs(y = ""), tmax_sp + ggplot2::labs(y = ""), prec_sp, ph_sp + ggplot2::labs(y = ""), peti_sp + ggplot2::labs(y = ""), tri_sp, trngx_sp + ggplot2::labs(y = ""), twi_sp + ggplot2::labs(y = ""), pseas_sp, tmin_sp + ggplot2::labs(y = ""), cowplot::plot_grid(NULL, p_icon, NULL, nrow = 3, rel_heights = c(1.5, 1, 1.5)), ncol = 3) +
+#   ggplot2::theme(plot.background = element_rect(fill = "white", colour = "white"))
+# birds
+p_spline <- cowplot::plot_grid(tmax_sp, tmin_sp + ggplot2::labs(y = ""), prec_sp + ggplot2::labs(y = ""), peti_sp, ph_sp + ggplot2::labs(y = ""), sun_sp + ggplot2::labs(y = ""), twi_sp, pseas_sp + ggplot2::labs(y = ""), tri_sp + ggplot2::labs(y = ""), trngx_sp, Geographic_sp + ggplot2::labs(y = ""), cowplot::plot_grid(NULL, p_icon, NULL, nrow = 3, rel_heights = c(1.5, 1, 1.5)), ncol = 3) +
+  ggplot2::theme(plot.background = element_rect(fill = "white", colour = "white"))
+
+# save plot
+cowplot::save_plot(paste0("outputs/", tax, "/", tax, "_spline.png"), p_spline, base_height = 14, base_width = 14, dpi = 300)
+
+```
+
+# Supplementary - Extinction England, Scotland, Wales
+
+```{r}
+
+# regional estimate of species committed to extinction
+ext_regional <- 1 - exp(sum(pers_df$numerator_ln) / sum(pers_df$cell_weight))
+
+```
+
+
+
+
+
+
+
