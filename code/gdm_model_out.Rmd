@@ -11,11 +11,22 @@ output: html_notebook
 
 ##############
 # chose taxonomic group
-tax <- "plants"
+tax <- "birds"
 ##############
 
 # load model
-gdmr <- readRDS(paste0("data/", tax, "/out_data/", tax, "_gdmr.rds"))
+if(tax == "birds") {
+  part1 <- readRDS("data/birds/out_data/birds_gdmr_1.rds")
+  part2 <- readRDS("data/birds/out_data/birds_gdmr_2.rds")
+  part3 <- readRDS("data/birds/out_data/birds_gdmr_3.rds")
+  
+  gdmr <- c(part1, part2, part3)
+  
+} else {
+  
+  gdmr <- readRDS(paste0("data/", tax, "/out_data/", tax, "_gdmr.rds"))
+  
+}
 
 # reference cells as comparison - 20% of cells
 ref_cells <- readRDS("data/ref_cells.rds")
@@ -265,7 +276,6 @@ pers <- function(gdmr, tr_curr, tr_curr_rc, ref_cells, hc_scenario, cc_scenario,
   # calculate persistence values for each focal cell i for all reference cells j
   # run in parallel across 4 cores
   pers_df <- lapply(1:1, function(i) {
-    # pbmcapply::pbmclapply
 
     # focal cell
     one_cell <- tr_curr[i,] # current
@@ -443,7 +453,7 @@ pers_reg(scenario_name = "baseline_2020", tax = tax)
 #
 # saveRDS(ref_cells, "data/ref_cells.rds")
 
-# # tr_curr, tr_curr_rc, tr_curr_split
+# # tr_curr, tr_curr_rc
 # 
 # # transform environmental covariates based on ecological relationships
 # # a non-linear transform of each environmental grid to include the estimated coefficients
@@ -468,11 +478,6 @@ pers_reg(scenario_name = "baseline_2020", tax = tax)
 #   dplyr::right_join(ref_cells, by = c("x", "y"))
 # 
 # saveRDS(tr_curr_rc, paste0("data/", tax, "/out_data/", tax, "_tr_curr_rc.rds"))
-# 
-# tr_curr_split <- dplyr::mutate(tr_curr, grp = as.numeric(ggplot2::cut_number(1:nrow(tr_curr), 10000))) %>%
-#   split(., f = .$grp)
-# 
-# saveRDS(tr_curr_split, paste0("data/", tax, "/out_data/", tax, "_tr_curr_split.rds"))
 
 ```
 

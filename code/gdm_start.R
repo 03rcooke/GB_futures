@@ -19,6 +19,7 @@ library(cowplot)
 library(corrplot)
 library(iNEXT)
 library(tibble)
+library(pbmcapply)
 
 # commit packages to renv library
 # renv::snapshot()

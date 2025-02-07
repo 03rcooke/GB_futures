@@ -16,5 +16,8 @@ Step 2 - run GDMs for each taxonomic group:
 
 Step 3 - calculate biodiversity metrics:
 
-`gdm_model_out.Rmd` runs the calculations of the biodiversity metrics (disappearing biocliamtes, novel bioclimates, and species heading for extinction). For each taxonomic group (choose taxonomic group at top of script)
+`gdm_model_out.Rmd` runs the calculations of the biodiversity metrics: disappearing bioclimates, novel bioclimates, and species heading for extinction for each taxonomic group (choose taxonomic group at top of script). This code is computationally intensive even in parallel. We ran the species heading for extinction calculations on a HPC (JASMIN).
 
+Step 4 - collate and plot:
+
+`gdm_cross_tax.Rmd` combines data across the taxonomic groups and creates the figures

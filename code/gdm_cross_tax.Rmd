@@ -5,8 +5,6 @@ date: "08/06/2021"
 output: html_notebook
 ---
 
-# Run all chunks in gdm_start above this "Above from here just for models"
-
 # Setup
 
 ```{r}
@@ -14,7 +12,12 @@ output: html_notebook
 # load models
 gdmr_plants <- readRDS(paste0("data/plants/out_data/plants_gdmr.rds"))
 gdmr_butterflies <- readRDS(paste0("data/butterflies/out_data/butterflies_gdmr.rds"))
-gdmr_birds <- readRDS(paste0("data/birds/out_data/birds_gdmr.rds"))
+
+part1 <- readRDS("data/birds/out_data/birds_gdmr_1.rds")
+part2 <- readRDS("data/birds/out_data/birds_gdmr_2.rds")
+part3 <- readRDS("data/birds/out_data/birds_gdmr_3.rds")
+gdmr_birds <- c(part1, part2, part3)
+rm(part1, part2, part3)
 
 # helper function - see Mokany et al., 2022
 # function to remove intercept from gdm predictions
