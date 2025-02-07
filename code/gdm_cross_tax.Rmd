@@ -1365,12 +1365,13 @@ gdmTab_birds <- readRDS(paste0("data/birds/out_data/birds_gdmTab.rds"))
 # gdm
 if(tax == "plants") gdmr_tax <- gdmr_plants
 if(tax == "butterflies") gdmr_tax <- gdmr_butterflies
-if(tax == "birds") gdmr_tax <- gdmr_birds
+if(tax == "birds") gdmr_tax <- gdmr_birds; class(gdmr_tax) = "gdm"
 
 # gdmTab
 if(tax == "plants") gdmTab_tax <- gdmTab_plants
 if(tax == "butterflies") gdmTab_tax <- gdmTab_butterflies
-if(tax == "birds") gdmTab_tax <- gdmTab_birds
+# if(tax == "birds") gdmTab_tax <- gdmTab_birds
+# gdmTab_birds is over 100Mb so isn't supported by GitHub, ask author for a copy
 
 # icon plot
 if(tax == "plants") p_icon <- p_plant
@@ -1431,11 +1432,10 @@ spline_plot <- function(df, rugs, var, xlab, max_y) {
   rug <- rugs[[var]]
   
   p <- ggplot2::ggplot(data = df, ggplot2::aes(x = !!as.name(x), y = !!as.name(y))) +
-    #ggplot2::geom_ribbon(ggplot2::aes(ymin = !!as.name(y) - !!as.name(y_sd), ymax = !!as.name(y) + !!as.name(y_sd), fill = type), alpha = 0.5) +
     ggplot2::geom_line(lwd = 1) +
     ggplot2::geom_rug(data = rug, ggplot2::aes(x = !!as.name(var)), sides = "b", inherit.aes = FALSE) +
     ggplot2::coord_cartesian(y = c(0, max_y), x = c(min_val, max_val)) +
-    ggplot2::labs(x = xlab, y = "Cumulative\ncompositional dissimilarity") + 
+    ggplot2::labs(x = xlab, y = "Partial\necological distance") + 
     ggplot2::theme(legend.position = "none")
   
   return(p)
