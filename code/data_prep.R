@@ -1,5 +1,4 @@
 # Data preparation code
-# Authors: Rob Cooke, Steven White, Colin Harrower
 
 #### Covariates ####
 

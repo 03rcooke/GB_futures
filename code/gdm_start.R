@@ -1,6 +1,5 @@
 # ---
 # title: "gdm_start"
-# author: "Rob Cooke"
 # date: "08/06/2021"
 # output: html_notebook
 # ---
