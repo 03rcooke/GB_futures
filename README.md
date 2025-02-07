@@ -1,3 +1,7 @@
+<!-- badges: start -->
+[![GitHub license](https://img.shields.io/github/license/Naereen/StrapDown.js.svg)](https://github.com/03rcooke/GB_futures/blob/main/LICENSE)
+<!-- badges: end -->
+
 # GB_futures
 
 This repository contains the R code and files underpinning: 'Plausible futures for British biodiversity under climate and land-use change'. 
@@ -22,3 +26,4 @@ This repository contains the R code and files underpinning: 'Plausible futures f
 
 `gdm_cross_tax.Rmd` combines data across the taxonomic groups and creates the figures. Includes the main and supplementary figures.
 
+These scripts have been run using R version 4.4.0 - Copyright (C) 2024 The R Foundation for Statistical Computing.
