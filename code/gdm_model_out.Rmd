@@ -11,7 +11,7 @@ output: html_notebook
 
 ##############
 # chose taxonomic group
-tax <- "birds"
+tax <- "plants"
 ##############
 
 # load model
