@@ -1,10 +1,11 @@
 <!-- badges: start -->
 [![GitHub license](https://img.shields.io/github/license/Naereen/StrapDown.js.svg)](https://github.com/03rcooke/GB_futures/blob/main/LICENSE)
+[![DOI](https://zenodo.org/badge/630854956.svg)](https://doi.org/10.5281/zenodo.8270297)
 <!-- badges: end -->
 
 # GB_futures
 
-This repository contains the R code and files underpinning: 'Plausible futures for British biodiversity under climate and land-use change'. 
+This repository contains the R code and files underpinning: 'Plausible futures for British biodiversity under climate and land-use change'. Rob Cooke, Victoria J. Burton, Calum Brown, Colin Harrower, Steven M. White, Rob Dunford-Brown, Richard Fox, Paula A. Harrison, Cang Hui, Chris Huntingford, Dario Massimino, Andy Purvis, Emma Robinson, James Rodger, Nick J. B. Isaac & James M. Bullock.
 
 **Step 0 - prepare data:**
 

@@ -1,5 +1,7 @@
 # Data preparation code
 
+# Authors: Rob Cooke, Steven White, Colin Harrower
+
 #### Covariates ####
 
 # install terra from github to avoid this bug https://github.com/rspatial/terra/issues/361
