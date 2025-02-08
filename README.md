@@ -1,6 +1,6 @@
 <!-- badges: start -->
 [![GitHub license](https://img.shields.io/github/license/Naereen/StrapDown.js.svg)](https://github.com/03rcooke/GB_futures/blob/main/LICENSE)
-[![DOI](https://zenodo.org/badge/630854956.svg)](https://doi.org/10.5281/zenodo.8270297)
+[![DOI](https://zenodo.org/badge/928898304.svg)](https://doi.org/10.5281/zenodo.14834251)
 <!-- badges: end -->
 
 # GB_futures
