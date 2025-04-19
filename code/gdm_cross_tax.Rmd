@@ -89,6 +89,204 @@ scenarios <- c("rcp26_2070", "rcp85_2070")
 
 ```
 
+# Compositional change
+
+```{r}
+
+# rcp scenarios
+covars_rcp <- c("covars_rcp26_2030", "covars_rcp26_2050", "covars_rcp26_2070", "covars_rcp85_2030", "covars_rcp85_2050", "covars_rcp85_2070")
+
+# function to calculate compositional change due to climate change
+cc_df <- function(gdmr_tax, scenarios) {
+  
+  ltime <- lapply(scenarios, function(s) {
+    
+    # predict
+  timep <- predict(object = gdmr_tax, data = raster::stack(covars), time = TRUE, predRasts = raster::stack(get(s)))
+  names(timep) <- "change_orig"
+    
+  # convert to dataframe
+  timep_df <- as.data.frame(timep, xy = TRUE) %>% 
+    # remove intercept
+    dplyr::mutate(change = remove_int(gdmr_tax, change_orig)) %>% 
+    # convert change to percentage
+    dplyr::mutate(change = change * 100) %>% 
+    # add scenario name
+    dplyr::mutate(scenario = s)
+  
+  }) %>% 
+    dplyr::bind_rows()
+  
+  return(ltime)
+  
+}
+
+## plants
+
+# run compositional change function
+cc_plants <- cc_df(gdmr_tax = gdmr_plants, scenarios = covars_rcp)
+
+# only RCP 2.6
+cc_plants_rcp26 <- dplyr::filter(cc_plants, scenario %in% covars_rcp[1:3]) %>% 
+  dplyr::mutate(scenario = dplyr::case_match(scenario, "covars_rcp26_2030" ~ "2030", "covars_rcp26_2050" ~ "2050", "covars_rcp26_2070" ~ "2070"))
+
+# interquartile range
+cc_plants_rcp26_iqr <- cc_plants_rcp26 %>% 
+  dplyr::group_by(scenario) %>% 
+  dplyr::summarise(Q1 = quantile(change, 0.25, na.rm = TRUE),
+                   Q3 = quantile(change, 0.75, na.rm = TRUE))
+
+# only RCP 8.5
+cc_plants_rcp85 <- dplyr::filter(cc_plants, scenario %in% covars_rcp[4:6]) %>% 
+  dplyr::mutate(scenario = dplyr::case_match(scenario, "covars_rcp85_2030" ~ "2030", "covars_rcp85_2050" ~ "2050", "covars_rcp85_2070" ~ "2070"))
+
+# interquartile range
+cc_plants_rcp85_iqr <- cc_plants_rcp85 %>% 
+  dplyr::group_by(scenario) %>% 
+  dplyr::summarise(Q1 = quantile(change, 0.25, na.rm = TRUE),
+                   Q3 = quantile(change, 0.75, na.rm = TRUE))
+
+## butterflies
+
+# run compositional change function
+cc_butterflies <- cc_df(gdmr_tax = gdmr_butterflies, scenarios = covars_rcp)
+
+# only RCP 2.6
+cc_butterflies_rcp26 <- dplyr::filter(cc_butterflies, scenario %in% covars_rcp[1:3]) %>% 
+  dplyr::mutate(scenario = dplyr::case_match(scenario, "covars_rcp26_2030" ~ "2030", "covars_rcp26_2050" ~ "2050", "covars_rcp26_2070" ~ "2070"))
+
+# interquartile range
+cc_butterflies_rcp26_iqr <- cc_butterflies_rcp26 %>% 
+  dplyr::group_by(scenario) %>% 
+  dplyr::summarise(Q1 = quantile(change, 0.25, na.rm = TRUE),
+                   Q3 = quantile(change, 0.75, na.rm = TRUE))
+
+# only RCP 8.5
+cc_butterflies_rcp85 <- dplyr::filter(cc_butterflies, scenario %in% covars_rcp[4:6]) %>% 
+  dplyr::mutate(scenario = dplyr::case_match(scenario, "covars_rcp85_2030" ~ "2030", "covars_rcp85_2050" ~ "2050", "covars_rcp85_2070" ~ "2070"))
+
+# interquartile range
+cc_butterflies_rcp85_iqr <- cc_butterflies_rcp85 %>% 
+  dplyr::group_by(scenario) %>% 
+  dplyr::summarise(Q1 = quantile(change, 0.25, na.rm = TRUE),
+                   Q3 = quantile(change, 0.75, na.rm = TRUE))
+
+## birds
+
+# run compositional change function
+cc_birds <- cc_df(gdmr_tax = gdmr_birds, scenarios = covars_rcp)
+
+# only RCP 2.6
+cc_birds_rcp26 <- dplyr::filter(cc_birds, scenario %in% covars_rcp[1:3]) %>% 
+  dplyr::mutate(scenario = dplyr::case_match(scenario, "covars_rcp26_2030" ~ "2030", "covars_rcp26_2050" ~ "2050", "covars_rcp26_2070" ~ "2070"))
+
+# interquartile range
+cc_birds_rcp26_iqr <- cc_birds_rcp26 %>% 
+  dplyr::group_by(scenario) %>% 
+  dplyr::summarise(Q1 = quantile(change, 0.25, na.rm = TRUE),
+                   Q3 = quantile(change, 0.75, na.rm = TRUE))
+
+# only RCP 8.5
+cc_birds_rcp85 <- dplyr::filter(cc_birds, scenario %in% covars_rcp[4:6]) %>% 
+  dplyr::mutate(scenario = dplyr::case_match(scenario, "covars_rcp85_2030" ~ "2030", "covars_rcp85_2050" ~ "2050", "covars_rcp85_2070" ~ "2070"))
+
+# interquartile range
+cc_birds_rcp85_iqr <- cc_birds_rcp85 %>% 
+  dplyr::group_by(scenario) %>% 
+  dplyr::summarise(Q1 = quantile(change, 0.25, na.rm = TRUE),
+                   Q3 = quantile(change, 0.75, na.rm = TRUE))
+
+## violin plots
+
+nudge <- 0.02
+rcp26_h <- 1.4
+
+# plants violin plot
+vio_plants <- ggplot2::ggplot() +
+  # rcp 2.6 violin
+  gghalves::geom_half_violin(data = cc_plants_rcp26, ggplot2::aes(x = scenario, y = change), colour = "#998ec3", fill = "#998ec3", alpha = 0.5, position = ggplot2::position_nudge(x = -nudge)) +
+  # rcp 8.5 violin
+  gghalves::geom_half_violin(data = cc_plants_rcp85, ggplot2::aes(x = scenario, y = change), side = "r", colour = "#f1a340", fill = "#f1a340", alpha = 0.5, position = ggplot2::position_nudge(x = nudge)) +
+  # rcp 2.6 median
+  ggplot2::stat_summary(data = cc_plants_rcp26, ggplot2::aes(x = scenario, y = change), fun = median, geom = "point", colour = "#69608C", position = ggplot2::position_nudge(x = -nudge)) +
+  # rcp 2.6 label
+  ggplot2::stat_summary(data = cc_plants_rcp26, ggplot2::aes(x = scenario, y = change, label = paste0(round(..y.., 0), "%")), fun = median, geom = "text", colour = "#69608C", hjust = rcp26_h) +
+  # rcp 2.6 iqr
+  ggplot2::geom_errorbar(data = cc_plants_rcp26_iqr, ggplot2::aes(x = scenario, ymin = Q1, ymax = Q3), width = 0, colour = "#69608C", position = ggplot2::position_nudge(x = -nudge)) +
+  # rcp 8.5 median
+  ggplot2::stat_summary(data = cc_plants_rcp85, ggplot2::aes(x = scenario, y = change), fun = median, geom = "point", colour = "#B37420", position = ggplot2::position_nudge(x = nudge)) +
+  # rcp 8.5 label
+  ggplot2::stat_summary(data = cc_plants_rcp85, ggplot2::aes(x = scenario, y = change, label = paste0(round(..y.., 0), "%")), fun = median, geom = "text", colour = "#B37420", hjust = -0.5) +
+  # rcp 8.5 iqr
+  ggplot2::geom_errorbar(data = cc_plants_rcp85_iqr, ggplot2::aes(x = scenario, ymin = Q1, ymax = Q3), width = 0, colour = "#B37420", position = ggplot2::position_nudge(x = nudge)) +
+  # add taxa icon
+  rphylopic::add_phylopic(plant_icon, x = 0.65, y = 0.9 * max(cc_birds$change), ysize = 15) +
+  ggplot2::scale_y_continuous(limits = c(0, max(cc_birds$change))) +
+  ggplot2::labs(y = "Compositional\nchange (%)") +
+  ggplot2::theme(axis.title.x = ggplot2::element_blank())
+
+# butterflies violin plot
+vio_butterflies <- ggplot2::ggplot() +
+  # rcp 2.6 violin
+  gghalves::geom_half_violin(data = cc_butterflies_rcp26, ggplot2::aes(x = scenario, y = change), colour = "#998ec3", fill = "#998ec3", alpha = 0.5, position = ggplot2::position_nudge(x = -nudge)) +
+  # rcp 8.5 violin
+  gghalves::geom_half_violin(data = cc_butterflies_rcp85, ggplot2::aes(x = scenario, y = change), side = "r", colour = "#f1a340", fill = "#f1a340", alpha = 0.5, position = ggplot2::position_nudge(x = nudge)) +
+  # rcp 2.6 median
+  ggplot2::stat_summary(data = cc_butterflies_rcp26, ggplot2::aes(x = scenario, y = change), fun = median, geom = "point", colour = "#69608C", position = ggplot2::position_nudge(x = -nudge)) +
+  # rcp 2.6 label
+  ggplot2::stat_summary(data = cc_butterflies_rcp26, ggplot2::aes(x = scenario, y = change, label = paste0(round(..y.., 0), "%")), fun = median, geom = "text", colour = "#69608C", hjust = rcp26_h) +
+  # rcp 2.6 iqr
+  ggplot2::geom_errorbar(data = cc_butterflies_rcp26_iqr, ggplot2::aes(x = scenario, ymin = Q1, ymax = Q3), width = 0, colour = "#69608C", position = ggplot2::position_nudge(x = -nudge)) +
+    # rcp 8.5 median
+  ggplot2::stat_summary(data = cc_butterflies_rcp85, ggplot2::aes(x = scenario, y = change), fun = median, geom = "point", colour = "#B37420", position = ggplot2::position_nudge(x = nudge)) +
+  # rcp 8.5 label
+  ggplot2::stat_summary(data = cc_butterflies_rcp85, ggplot2::aes(x = scenario, y = change, label = paste0(round(..y.., 0), "%")), fun = median, geom = "text", colour = "#B37420", hjust = -0.5) +
+  # rcp 8.5 iqr
+  ggplot2::geom_errorbar(data = cc_butterflies_rcp85_iqr, ggplot2::aes(x = scenario, ymin = Q1, ymax = Q3), width = 0, colour = "#B37420", position = ggplot2::position_nudge(x = nudge)) + 
+  # add taxa icon
+  rphylopic::add_phylopic(butter_icon, x = 0.65, y = 0.9 * max(cc_birds$change), ysize = 15) +
+  ggplot2::scale_y_continuous(limits = c(0, max(cc_birds$change))) +
+  ggplot2::labs(y = "Compositional\nchange (%)") +
+  ggplot2::theme(axis.title.x = ggplot2::element_blank())
+
+# birds violin plot
+vio_birds <- ggplot2::ggplot() +
+  # rcp 2.6 violin
+  gghalves::geom_half_violin(data = cc_birds_rcp26, ggplot2::aes(x = scenario, y = change), colour = "#998ec3", fill = "#998ec3", alpha = 0.5, position = ggplot2::position_nudge(x = -nudge)) +
+  # rcp 8.5 violin
+  gghalves::geom_half_violin(data = cc_birds_rcp85, ggplot2::aes(x = scenario, y = change), side = "r", colour = "#f1a340", fill = "#f1a340", alpha = 0.5, position = ggplot2::position_nudge(x = nudge)) +
+  # rcp 2.6 median
+  ggplot2::stat_summary(data = cc_birds_rcp26, ggplot2::aes(x = scenario, y = change), fun = median, geom = "point", colour = "#69608C", position = ggplot2::position_nudge(x = -nudge)) +
+  # rcp 2.6 label
+  ggplot2::stat_summary(data = cc_birds_rcp26, ggplot2::aes(x = scenario, y = change, label = paste0(round(..y.., 0), "%")), fun = median, geom = "text", colour = "#69608C", hjust = rcp26_h) +
+  # rcp 2.6 iqr
+  ggplot2::geom_errorbar(data = cc_birds_rcp26_iqr, ggplot2::aes(x = scenario, ymin = Q1, ymax = Q3), width = 0, colour = "#69608C", position = ggplot2::position_nudge(x = -nudge)) +
+  # rcp 8.5 median
+  ggplot2::stat_summary(data = cc_birds_rcp85, ggplot2::aes(x = scenario, y = change), fun = median, geom = "point", colour = "#B37420", position = ggplot2::position_nudge(x = nudge)) +
+  # rcp 8.5 label
+  ggplot2::stat_summary(data = cc_birds_rcp85, ggplot2::aes(x = scenario, y = change, label = paste0(round(..y.., 0), "%")), fun = median, geom = "text", colour = "#B37420", hjust = -0.5) +
+  # rcp 8.5 iqr
+  ggplot2::geom_errorbar(data = cc_birds_rcp85_iqr, ggplot2::aes(x = scenario, ymin = Q1, ymax = Q3), width = 0, colour = "#B37420", position = ggplot2::position_nudge(x = nudge)) +
+  # add taxa icon
+  rphylopic::add_phylopic(bird_icon, x = 0.65, y = 0.9 * max(cc_birds$change), ysize = 15) +
+  ggplot2::scale_y_continuous(limits = c(0, max(cc_birds$change))) +
+  ggplot2::labs(y = "Compositional\nchange (%)") +
+  ggplot2::theme(axis.title.x = ggplot2::element_blank())
+
+# create legend for all plots
+cc_leg <- cowplot::get_legend(ggplot2::ggplot(data.frame(category = c("RCP2.6", "RCP8.5"), value = c(10, 20)), aes(x = category, y = value, fill = category)) +
+  ggplot2::geom_bar(stat = "identity") +
+  ggplot2::scale_fill_manual(values = c("RCP2.6" = "#998ec3", "RCP8.5" = "#f1a340")) +
+  ggplot2::theme(legend.title = ggplot2::element_blank()))
+
+# combine plots
+vio_comb <- cowplot::plot_grid(cowplot::plot_grid(vio_plants, vio_butterflies, vio_birds, nrow = 3, labels = "auto"), cc_leg, rel_widths = c(1, 0.15)) +
+  ggplot2::theme(plot.background = element_rect(fill = "white", colour = "white"))
+
+cowplot::save_plot("outputs/vio_comb.png", vio_comb, base_height = 8, base_width = 8, dpi = 300)
+
+```
+
 # Disappearing and novel
 
 ```{r}
@@ -154,9 +352,9 @@ comb_disnov <- load_disnov(tax = tax, scenarios = scenarios) %>%
 ```{r}
 
 dim_set <- 2
-col_bi <- "DkBlue2"
+col_bi <- "DkViolet2"
 # colours
-# # biscale::bi_pal(pal = "DkBlue2", dim = 2, preview = FALSE)
+# # biscale::bi_pal(pal = "DkViolet2", dim = 2, preview = FALSE)
 
 # threshold
 thresh <- 10
@@ -202,11 +400,11 @@ coloc_map  <- function(df, rcp_name, tax_name, area = TRUE, icon = TRUE, title) 
     # bivariate fill
     biscale::bi_scale_fill(pal = col_bi, dim = dim_set, rotate_pal = FALSE) +
     # add jaccard similarity
-    ggplot2::geom_text(x = 120000, y = 450000, label = paste("J", sprintf("%.2f", jac)), size = lab_size) +
+    ggplot2::geom_text(x = 120000, y = 450000, label = paste("J =", sprintf("%.2f", jac)), size = lab_size) +
     # add area covered by disappearing bioclimates
-    {if(area == TRUE) ggplot2::geom_text(x = 520000, y = 800000, label = paste0(sprintf("%.0f", area_dis), "%"), size = lab_size, colour = "#ad5b9c")} +
+    {if(area == TRUE) ggplot2::geom_text(x = 520000, y = 800000, label = paste0(sprintf("%.0f", area_dis), "%"), size = lab_size, colour = "#4279b0")} +
     # add area covered by novel bioclimates
-    {if(area == TRUE) ggplot2::geom_text(x = 520000, y = 700000, label = paste0(sprintf("%.0f", area_nov), "%"), size = lab_size, colour = "#52b6b6")} +
+    {if(area == TRUE) ggplot2::geom_text(x = 520000, y = 700000, label = paste0(sprintf("%.0f", area_nov), "%"), size = lab_size, colour = "#9e3547")} +
     # add taxa icon
     {if(icon == TRUE) rphylopic::add_phylopic(icon_pic, x = 110000, y = 1110000, ysize = 110000)} +
     # labels
@@ -254,14 +452,14 @@ clc_bi_85 <- coloc_map(df = coloc, rcp_name = "RCP8.5", tax_name = "birds", titl
 
 # combine plots
 coloc_comb <- cowplot::plot_grid(
-  cowplot::plot_grid(clc_pl_26,  clc_bu_26, clc_bi_26, nrow = 1, labels = c("A", "", "")),
-  cowplot::plot_grid(clc_pl_85, clc_bu_85, clc_bi_85, nrow = 1, labels = c("B", "", "")),
+  cowplot::plot_grid(clc_pl_26,  clc_bu_26, clc_bi_26, nrow = 1, labels = c("a", "", "")),
+  cowplot::plot_grid(clc_pl_85, clc_bu_85, clc_bi_85, nrow = 1, labels = c("b", "", "")),
   cowplot::plot_grid(NULL, coloc_leg, NULL, nrow = 1, rel_widths = c(1, 1, 1)),
   nrow = 3, rel_heights = c(1, 1, 0.5)) +
   ggplot2::theme(plot.background = element_rect(fill = "white", colour = "white"))
 
-# # save
-# cowplot::save_plot(paste0("outputs/coloc_comb_min_thresh_", thresh, ".png"), coloc_comb, base_height = 9, base_width = 6.4, dpi = 300)
+# save
+cowplot::save_plot(paste0("outputs/coloc_comb_min_thresh_", thresh, ".png"), coloc_comb, base_height = 9, base_width = 6.4, dpi = 600)
 
 # stats
 
@@ -388,8 +586,7 @@ ext_plot <- function(df, icon = TRUE, leg = FALSE) {
     # add taxa icon
     {if(icon == TRUE) rphylopic::add_phylopic(icon_pic, x = 2018.5, y = pers_reg_max, ysize = 1.5)} +
     ggplot2::scale_x_continuous(breaks = c(2030, 2050, 2070)) +
-    ggplot2::scale_y_continuous(name = "Percent of\nspecies persisting", limits = c(pers_reg_min, pers_reg_max), sec.axis = ggplot2::sec_axis(trans = ~ ((100 - .) / 100) * df$n_spp, name = "Species heading\nfor extinction")) +
-    #ggplot2::labs(title = firstup(df$tax)) +
+    ggplot2::scale_y_continuous(name = "Percent of\nspecies persisting", limits = c(pers_reg_min, pers_reg_max), sec.axis = ggplot2::sec_axis(trans = ~ ((100 - .) / 100) * df$n_spp, name = "Number of species\nheading for extinction")) +
     ggplot2::scale_colour_manual(values = ext_pal, guide = ggplot2::guide_legend(ncol = 2)) +
     # legend
     {if(leg == FALSE) ggplot2::theme(legend.position = "none")} +
@@ -527,10 +724,20 @@ pmap_birds_rcp45_ssp2_2070 <- pers_map(scenario_name = "rcp45_ssp2_2070", lims =
   ggplot2::theme(strip.background = ggplot2::element_rect(fill = "#6EA6CD", colour = "#6EA6CD"))
 
 # legend across plots
-pmap_leg <- cowplot::get_legend(pers_map(scenario_name = "rcp26_ssp1_2070", lims = lims, tax = "plants", leg = TRUE) +
-                                  ggplot2::labs(fill = "Percent of species\nheading for extinction") +
-                                  scico::scale_fill_scico(palette = "bilbao", na.value = "grey", limits = lims, direction = 1, guide = ggplot2::guide_colorbar(title.position = "top", title.hjust = 0.5)) +
-                                  ggplot2::theme(legend.position = "bottom")) 
+pmap_leg <- ggplot(data.frame(x = 1:10, y = 1:10, extinct = c(rep(lims[1], 9), lims[2])), aes(x = x, y = y, fill = extinct)) +
+  geom_point(colour = "white") +
+  ggplot2::labs(fill = "Percent of species\nheading for extinction") +
+  scico::scale_fill_scico(palette = "bilbao", na.value = "grey", limits = lims, direction = -1, guide = guide_colorbar(title.position = "top", title.hjust = 0.5)) +
+  theme_void() +
+  theme(legend.position = "bottom",
+        axis.title = element_blank(),
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        panel.grid = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank(),
+        plot.background = element_blank(),
+        plot.margin = margin(0, 0, 5, 0))
 
 ```
 
@@ -552,11 +759,8 @@ ext_comb <- cowplot::plot_grid(
   cowplot::plot_grid(ext_plot_butterflies, pmap_butterflies_rcp85_ssp5_2070, pmap_butterflies_rcp85_ssp2_2070, ncol = 3, rel_widths = c(1, 0.5, 0.5)),
   cowplot::plot_grid(ext_plot_birds, pmap_birds_rcp85_ssp5_2070, pmap_birds_rcp45_ssp2_2070, ncol = 3, rel_widths = c(1, 0.5, 0.5)),
   cowplot::plot_grid(cowplot::plot_grid(NULL, ext_plot_leg, NULL, ncol = 3, rel_widths = c(0.2, 1, 0.2)), pmap_leg, ncol = 2, rel_widths = c(1, 1)),
-labels = c("A", "B", "C", ""), nrow = 4, rel_heights = c(1.2, 1, 1, 0.5)) +
+labels = c("a", "b", "c", ""), nrow = 4, rel_heights = c(1.2, 1, 1, 0.5)) +
   ggplot2::theme(plot.background = ggplot2::element_rect(fill = "white", colour = "white"))
-
-# # colours
-# scales::show_col(scico::scico(9, palette = "bilbao"))
 
 # save
 cowplot::save_plot("outputs/ext_comb.png", ext_comb, base_height = 8, base_width = 9, dpi = 600)
@@ -784,7 +988,7 @@ cowplot::save_plot("outputs/gd_fit_all.png", gd_fit_all, base_height = 10, base_
 
 ```
 
-# Supplementary - Biological change
+# Supplementary - Compositional change
 
 ```{r}
 
@@ -796,7 +1000,7 @@ if(tax == "plants") gdmr_tax <- gdmr_plants
 if(tax == "butterflies") gdmr_tax <- gdmr_butterflies
 if(tax == "birds") gdmr_tax <- gdmr_birds
 
-# function to map biological change due to climate change
+# function to map compositional change due to climate change
 cc_map <- function(gdmr_tax, covars_rcp, title, lims, leg = FALSE) {
   
   # predict
@@ -817,7 +1021,7 @@ cc_map <- function(gdmr_tax, covars_rcp, title, lims, leg = FALSE) {
     ggplot2::geom_text(x = 500000, y = 700000, label = round(median(timep_df$change, na.rm = TRUE), digits = 0)) +
     ggplot2::coord_equal() +
     ggplot2::theme_void() +
-    ggplot2::labs(title = title, fill = "Biological\nchange (%)") +
+    ggplot2::labs(title = title, fill = "Compositional\nchange (%)") +
     ggplot2::scale_fill_gradientn(colours = c("#ECF1EC", "#D3DED6", "#BACCC3", "#A2B9B2", "#8AA6A4", "#738D92", "#5B717E", "#44546A", "#302E4C", "#24192C", "#0B060B"), limits = lims) +
     ggplot2::theme(plot.title = ggplot2::element_text(hjust = 0.5, face = "bold"),
                    plot.background = element_rect(fill = "white", colour = "white"))
@@ -838,40 +1042,40 @@ cc_map <- function(gdmr_tax, covars_rcp, title, lims, leg = FALSE) {
 lims <- c(0.014, 95.163)
 
 # RCP 2.6 2030
-ccmap_rcp26_2030 <- cc_map(gdmr_tax = gdmr_tax, covars = raster::stack(covars_rcp26_2030), title = "RCP2.6\n2030", lims = lims)
+ccmap_rcp26_2030 <- cc_map(gdmr_tax = gdmr_tax, covars_rcp = raster::stack(covars_rcp26_2030), title = "RCP2.6\n2030", lims = lims)
 
 # RCP 2.6 2050
-ccmap_rcp26_2050 <- cc_map(gdmr_tax = gdmr_tax, covars = raster::stack(covars_rcp26_2050), title = "RCP2.6\n2050", lims = lims)
+ccmap_rcp26_2050 <- cc_map(gdmr_tax = gdmr_tax, covars_rcp = raster::stack(covars_rcp26_2050), title = "RCP2.6\n2050", lims = lims)
 
 # RCP 2.6 2070
-ccmap_rcp26_2070 <- cc_map(gdmr_tax = gdmr_tax, covars = raster::stack(covars_rcp26_2070), title = "RCP2.6\n2070", lims = lims)
+ccmap_rcp26_2070 <- cc_map(gdmr_tax = gdmr_tax, covars_rcp = raster::stack(covars_rcp26_2070), title = "RCP2.6\n2070", lims = lims)
 
 # RCP 4.5 2030
-ccmap_rcp45_2030 <- cc_map(gdmr_tax = gdmr_tax, covars = raster::stack(covars_rcp45_2030), title = "RCP4.5\n2030", lims = lims)
+ccmap_rcp45_2030 <- cc_map(gdmr_tax = gdmr_tax, covars_rcp = raster::stack(covars_rcp45_2030), title = "RCP4.5\n2030", lims = lims)
 
 # RCP 4.5 2050
-ccmap_rcp45_2050 <- cc_map(gdmr_tax = gdmr_tax, covars = raster::stack(covars_rcp45_2050), title = "RCP4.5\n2050", lims = lims)
+ccmap_rcp45_2050 <- cc_map(gdmr_tax = gdmr_tax, covars_rcp = raster::stack(covars_rcp45_2050), title = "RCP4.5\n2050", lims = lims)
 
 # RCP 4.5 2070
-ccmap_rcp45_2070 <- cc_map(gdmr_tax = gdmr_tax, covars = raster::stack(covars_rcp45_2070), title = "RCP4.5\n2070", lims = lims)
+ccmap_rcp45_2070 <- cc_map(gdmr_tax = gdmr_tax, covars_rcp = raster::stack(covars_rcp45_2070), title = "RCP4.5\n2070", lims = lims)
 
 # RCP 6.0 2030
-ccmap_rcp60_2030 <- cc_map(gdmr_tax = gdmr_tax, covars = raster::stack(covars_rcp60_2030), title = "RCP6.0\n2030", lims = lims)
+ccmap_rcp60_2030 <- cc_map(gdmr_tax = gdmr_tax, covars_rcp = raster::stack(covars_rcp60_2030), title = "RCP6.0\n2030", lims = lims)
 
 # RCP 6.0 2050
-ccmap_rcp60_2050 <- cc_map(gdmr_tax = gdmr_tax, covars = raster::stack(covars_rcp60_2050), title = "RCP6.0\n2050", lims = lims)
+ccmap_rcp60_2050 <- cc_map(gdmr_tax = gdmr_tax, covars_rcp = raster::stack(covars_rcp60_2050), title = "RCP6.0\n2050", lims = lims)
 
 # RCP 6.0 2070
-ccmap_rcp60_2070 <- cc_map(gdmr_tax = gdmr_tax, covars = raster::stack(covars_rcp60_2070), title = "RCP6.0\n2070", lims = lims)
+ccmap_rcp60_2070 <- cc_map(gdmr_tax = gdmr_tax, covars_rcp = raster::stack(covars_rcp60_2070), title = "RCP6.0\n2070", lims = lims)
 
 # RCP 8.5 2030
-ccmap_rcp85_2030 <- cc_map(gdmr_tax = gdmr_tax, covars = raster::stack(covars_rcp85_2030), title = "RCP8.5\n2030", lims = lims)
+ccmap_rcp85_2030 <- cc_map(gdmr_tax = gdmr_tax, covars_rcp = raster::stack(covars_rcp85_2030), title = "RCP8.5\n2030", lims = lims)
 
 # RCP 8.5 2050
-ccmap_rcp85_2050 <- cc_map(gdmr_tax = gdmr_tax, covars = raster::stack(covars_rcp85_2050), title = "RCP8.5\n2050", lims = lims)
+ccmap_rcp85_2050 <- cc_map(gdmr_tax = gdmr_tax, covars_rcp = raster::stack(covars_rcp85_2050), title = "RCP8.5\n2050", lims = lims)
 
 # RCP 8.5 2070
-ccmap_rcp85_2070 <- cc_map(gdmr_tax = gdmr_tax, covars = raster::stack(covars_rcp85_2070), title = "RCP8.5\n2070", lims = lims)
+ccmap_rcp85_2070 <- cc_map(gdmr_tax = gdmr_tax, covars_rcp = raster::stack(covars_rcp85_2070), title = "RCP8.5\n2070", lims = lims)
 
 # combine plots
 cc_maps_comb1 <- cowplot::plot_grid(ccmap_rcp26_2030, ccmap_rcp26_2050, ccmap_rcp26_2070, ccmap_rcp45_2030, ccmap_rcp45_2050, ccmap_rcp45_2070, ccmap_rcp60_2030, ccmap_rcp60_2050, ccmap_rcp60_2070, ccmap_rcp85_2030, ccmap_rcp85_2050, ccmap_rcp85_2070, ncol = 3)
@@ -891,7 +1095,7 @@ cc_maps_comb <- cowplot::plot_grid(cc_maps_comb1, cowplot::plot_grid(NULL, cc_le
   ggplot2::theme(plot.background = element_rect(fill = "white", colour = "white"))
 
 # save
-cowplot::save_plot(paste0("outputs/", tax, "/", tax, "_biochange_maps_comb.png"), cc_maps_comb, base_height = 10, base_width = 6, dpi = 300)
+cowplot::save_plot(paste0("outputs/", tax, "/", tax, "_biochange_maps_comb.png"), cc_maps_comb, base_height = 10, base_width = 6, dpi = 600)
 
 ## Stats
 
@@ -963,7 +1167,7 @@ disappear_map_out <- function(scenario_name, metric, title, lims, tax, leg = FAL
     ggplot2::coord_equal() +
     ggplot2::labs(title = title, fill = "Disappearing\nbioclimates (%)") +
     # colours
-    ggplot2::scale_fill_gradientn(colours = c("#EDF0F8", "#C2B9E3", "#B688C9", "#AD5B9C", "#984D99", "#754084", "#55346F", "#392859", "#211C42", "#12142B", "#080B13"), limits = lims) +
+    ggplot2::scale_fill_gradientn(colours = c("#EBF2F8", "#B1C9E2", "#78A1CA", "#4279b0", "#38699B", "#2F5A85", "#264A6F", "#1D3B59", "#152B42", "#0D1C2A", "#060C13"), limits = lims) + 
     # theme
     ggplot2::theme_void() +
     {if(leg == FALSE) ggplot2::theme(legend.position = "none", plot.margin = unit(c(0, 0, 0, 0), "cm"))} +
@@ -1031,7 +1235,7 @@ d_maps_comb <- cowplot::plot_grid(d_maps_comb1, cowplot::plot_grid(NULL, d_leg_i
   ggplot2::theme(plot.background = element_rect(fill = "white", colour = "white"))
 
 # save
-cowplot::save_plot(paste0("outputs/", tax, "/", tax, "_d_maps_comb.png"), d_maps_comb, base_height = 10, base_width = 6.2, dpi = 300)
+cowplot::save_plot(paste0("outputs/", tax, "/", tax, "_d_maps_comb.png"), d_maps_comb, base_height = 10, base_width = 6.2, dpi = 600)
 
 # # limits
 # min_lim <- min(c(min(dmap_rcp26_2030$data$disappearing_min), min(dmap_rcp26_2050$data$disappearing_min), min(dmap_rcp26_2070$data$disappearing_min), min(dmap_rcp45_2030$data$disappearing_min), min(dmap_rcp45_2050$data$disappearing_min), min(dmap_rcp45_2070$data$disappearing_min), min(dmap_rcp60_2030$data$disappearing_min), min(dmap_rcp60_2050$data$disappearing_min), min(dmap_rcp60_2070$data$disappearing_min), min(dmap_rcp85_2030$data$disappearing_min), min(dmap_rcp85_2050$data$disappearing_min), min(dmap_rcp85_2070$data$disappearing_min)))
@@ -1088,7 +1292,7 @@ novel_map_out <- function(scenario_name, metric, med = FALSE, title, lims, tax, 
     ggplot2::coord_equal() +
     ggplot2::labs(title = title, fill = "Novel\nbioclimates (%)") +
     # colours
-    ggplot2::scale_fill_gradientn(colours = c("#ECFAF7", "#B5E7E2", "#81D1CC", "#52B6B6", "#45A19B", "#398B80", "#2D7566", "#225E4D", "#184636", "#0F2E20", "#06140D"), limits = lims) +
+    ggplot2::scale_fill_gradientn(colours = c("#F6EAEC", "#DBABB4", "#BE6F7D", "#9e3547", "#8B2D3D", "#782533", "#641E2A", "#501721", "#3B1018", "#260A0F", "#110406"), limits = lims) +
     # theme
     ggplot2::theme_void() +
     {if(leg == FALSE) ggplot2::theme(legend.position = "none", plot.margin = unit(c(0, 0, 0, 0), "cm"))} +
@@ -1156,7 +1360,7 @@ n_maps_comb <- cowplot::plot_grid(n_maps_comb1, cowplot::plot_grid(NULL, n_leg_i
   ggplot2::theme(plot.background = element_rect(fill = "white", colour = "white"))
 
 # save
-cowplot::save_plot(paste0("outputs/", tax, "/", tax, "_n_maps_comb.png"), n_maps_comb, base_height = 10, base_width = 6.2, dpi = 300)
+cowplot::save_plot(paste0("outputs/", tax, "/", tax, "_n_maps_comb.png"), n_maps_comb, base_height = 10, base_width = 6.2, dpi = 600)
 
 # # limits
 # min_lim <- min(c(min(nmap_rcp26_2030$data$novel_min), min(nmap_rcp26_2050$data$novel_min), min(nmap_rcp26_2070$data$novel_min), min(nmap_rcp45_2030$data$novel_min), min(nmap_rcp45_2050$data$novel_min), min(nmap_rcp45_2070$data$novel_min), min(nmap_rcp60_2030$data$novel_min), min(nmap_rcp60_2050$data$novel_min), min(nmap_rcp60_2070$data$novel_min), min(nmap_rcp85_2030$data$novel_min), min(nmap_rcp85_2050$data$novel_min), min(nmap_rcp85_2070$data$novel_min)))

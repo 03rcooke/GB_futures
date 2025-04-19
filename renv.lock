@@ -541,6 +541,20 @@
       ],
       "Hash": "15e9634c0fcd294799e9b2e929ed1b86"
     },
+    "gghalves": {
+      "Package": "gghalves",
+      "Version": "0.1.4",
+      "Source": "Repository",
+      "Repository": "CRAN",
+      "Requirements": [
+        "R",
+        "ggplot2",
+        "grDevices",
+        "grid",
+        "gtable"
+      ],
+      "Hash": "141e061a5a68d463f11a4b5819ef0357"
+    },
     "ggplot2": {
       "Package": "ggplot2",
       "Version": "3.5.1",
