@@ -5,7 +5,9 @@
 
 # GB_futures
 
-This repository contains the R code and files underpinning: 'Plausible futures for British biodiversity under climate and land-use change'. Rob Cooke, Victoria J. Burton, Calum Brown, Colin Harrower, Steven M. White, Rob Dunford-Brown, Richard Fox, Paula A. Harrison, Cang Hui, Chris Huntingford, Dario Massimino, Andy Purvis, Emma Robinson, James Rodger, Nick J. B. Isaac & James M. Bullock.
+This repository contains the R code and files underpinning: 'Future scenarios for British biodiversity under climate and land-use change'. Rob Cooke, Victoria J. Burton, Calum Brown, Colin Harrower, Steven M. White, Rob Dunford-Brown, Richard Fox, Paula A. Harrison, Cang Hui, Chris Huntingford, Dario Massimino, Andy Purvis, Emma Robinson, James Rodger, Nick J. B. Isaac & James M. Bullock.
+
+Keywords: beta diversity, climate change, compositional dissimilarity, extinction, land-use change, representative concentration pathways, shared socioeconomic pathways
 
 ***
 
